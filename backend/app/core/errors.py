@@ -1,4 +1,4 @@
-"""Domain errors raised by the data layer. main.py turns them into HTTP responses."""
+"""Domain errors raised by the data layer. Handlers turn them into HTTP responses."""
 
 
 class AppError(Exception):

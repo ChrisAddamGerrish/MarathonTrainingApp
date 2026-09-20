@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, jsonRequest } from "../api";
-import { useData } from "../DataContext";
-import { DetailRows, DiffRows, diffActivity } from "../lib/diff";
-import { CATEGORIES } from "../lib/format";
-import { planLinkWarnings } from "../lib/planLink";
+import { api, jsonRequest } from "../services/api";
+import { useData } from "../contexts/DataContext";
+import { DetailRows, DiffRows, diffActivity } from "../utils/diff";
+import { CATEGORIES } from "../utils/format";
+import { planLinkWarnings } from "../utils/planLink";
 
 const str = v => (v == null ? "" : String(v));
 const toNumber = s => (s === "" || s == null ? null : Number(s));

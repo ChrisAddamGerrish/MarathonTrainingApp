@@ -1,3 +1,4 @@
+"""Database engine, session management, and schema initialization."""
 from typing import Iterator
 
 from sqlalchemy import Connection, Table, create_engine, event, inspect
@@ -5,9 +6,9 @@ from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateColumn
 
-from config import DB_PATH
-from models import ActivityHistory, Base, PlanSkip
-from triggers import install_history_triggers
+from backend.app.core.config import DB_PATH
+from backend.app.models.models import ActivityHistory, Base, PlanSkip
+from backend.app.services.triggers import install_history_triggers
 
 # check_same_thread=False: FastAPI may run a request's dependency and its endpoint in different
 # worker threads; each request still gets its own session (and so its own connection).

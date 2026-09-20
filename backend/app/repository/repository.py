@@ -1,5 +1,5 @@
 """All database access, written against the ORM models. Functions take a Session and return
-plain dicts / raise domain errors, so callers (main.py) never touch SQL or SQLAlchemy objects."""
+plain dicts / raise domain errors, so callers never touch SQL or SQLAlchemy objects."""
 from datetime import date
 from typing import Any, Optional
 
@@ -7,8 +7,8 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from errors import ConflictError, NotFoundError, UnprocessableError
-from models import (
+from backend.app.core.errors import ConflictError, NotFoundError, UnprocessableError
+from backend.app.models.models import (
     ACTIVITY_COLUMNS,
     ActivityHistory,
     ActivityLog,
@@ -16,7 +16,7 @@ from models import (
     PlanVsActual,
     TrainingPlan,
 )
-from planning import week_of
+from backend.app.services.planning import week_of
 
 # --------------------------------------------------------------------------
 # Row -> dict

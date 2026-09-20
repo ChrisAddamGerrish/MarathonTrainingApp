@@ -4,7 +4,7 @@ Pure functions over plain dicts (no database access), so they are easy to reason
 """
 from datetime import date, timedelta
 
-from config import PLAN_START
+from backend.app.core.config import PLAN_START
 
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 RUN_CATEGORIES = ("Run", "Race")

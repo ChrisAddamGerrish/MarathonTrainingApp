@@ -4,7 +4,7 @@
     {
       "name": "marathon",
       "runtimeExecutable": ".venv/Scripts/python.exe",
-      "runtimeArgs": ["-m", "uvicorn", "main:app", "--port", "8000"],
+      "runtimeArgs": ["-m", "uvicorn", "backend.app.main:app", "--port", "8000"],
       "port": 8000
     },
     {

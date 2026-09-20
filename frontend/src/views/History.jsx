@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
-import { useData } from "../DataContext";
-import { useDialogs } from "../Dialogs";
-import { DetailRows, DiffRows } from "../lib/diff";
-import { activityStats, fmtDate } from "../lib/format";
-import { revertInfo } from "../lib/revert";
-import { useToast } from "../Toast";
+import { api } from "../services/api";
+import { useData } from "../contexts/DataContext";
+import { useDialogs } from "../contexts/DialogContext";
+import { DetailRows, DiffRows } from "../utils/diff";
+import { activityStats, fmtDate } from "../utils/format";
+import { revertInfo } from "../utils/revert";
+import { useToast } from "../contexts/ToastContext";
 
 const ACTION_LABEL = { INSERT: "Added", UPDATE: "Edited", DELETE: "Deleted" };
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { DataProvider, useData } from "./DataContext";
-import { DialogProvider } from "./Dialogs";
-import { ToastProvider } from "./Toast";
-import { useRoute } from "./useRoute";
+import { DataProvider, useData } from "./contexts/DataContext";
+import { DialogProvider } from "./contexts/DialogContext";
+import { ToastProvider } from "./contexts/ToastContext";
+import { useRoute } from "./hooks/useRoute";
 import Dashboard from "./views/Dashboard";
 import History from "./views/History";
 import Log from "./views/Log";

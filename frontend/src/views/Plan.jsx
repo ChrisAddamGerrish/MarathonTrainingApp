@@ -1,5 +1,5 @@
-import { useData } from "../DataContext";
-import { fmtDate, focusWeek } from "../lib/format";
+import { useData } from "../contexts/DataContext";
+import { fmtDate, focusWeek } from "../utils/format";
 import WeekDetail from "../components/WeekDetail";
 
 const SHORT_TYPE = { Normal: "", "Step-back": "Step-back", Taper: "Taper", Peak: "Peak", Race: "Race" };

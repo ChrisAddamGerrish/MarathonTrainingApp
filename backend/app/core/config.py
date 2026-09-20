@@ -2,7 +2,8 @@ import os
 from datetime import date
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
+# Project root directory
+BASE_DIR = Path(__file__).resolve().parents[3]
 DIST_DIR = BASE_DIR / "frontend" / "dist"  # built React app (npm run build in frontend/)
 DB_PATH = Path(os.environ.get("MARATHON_DB", BASE_DIR / "marathon.db"))
 

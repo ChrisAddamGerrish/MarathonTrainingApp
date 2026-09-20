@@ -153,7 +153,7 @@ try {
     $server = $null
     try {
         Write-Step "Starting the server on $Url"
-        $uvicornArgs = @('-m', 'uvicorn', 'main:app', '--port', "$Port")
+        $uvicornArgs = @('-m', 'uvicorn', 'backend.app.main:app', '--port', "$Port")
         if ($Dev) { $uvicornArgs += '--reload' }
         $server = Start-Process -FilePath $Python -ArgumentList $uvicornArgs -WorkingDirectory $Root -NoNewWindow -PassThru
         $null = $server.Handle   # keeps the exit code readable after the process ends
