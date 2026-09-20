@@ -1,5 +1,8 @@
 """All database access, written against the ORM models. Functions take a Session and return
-plain dicts / raise domain errors, so callers never touch SQL or SQLAlchemy objects."""
+plain dicts / raise domain errors, so callers never touch SQL or SQLAlchemy objects.
+
+Every change to the data is logged here, once, whichever entry point (REST or MCP) made it."""
+import logging
 from datetime import date
 from typing import Any, Optional
 
@@ -17,6 +20,8 @@ from backend.app.models.models import (
     TrainingPlan,
 )
 from backend.app.services.planning import week_of
+
+log = logging.getLogger("marathon.repo")
 
 # --------------------------------------------------------------------------
 # Row -> dict
@@ -104,6 +109,7 @@ def skip_session(session: Session, plan_id: str, reason: Optional[str]) -> dict[
     else:
         plan.skip.reason = reason
     session.commit()
+    log.info("Session %s skipped (%s)", plan_id, reason or "no reason given")
     return {"plan_id": plan_id, "skipped": True, "reason": reason}
 
 
@@ -113,6 +119,7 @@ def unskip_session(session: Session, plan_id: str) -> dict[str, Any]:
         raise NotFoundError("That session isn't skipped")
     session.delete(skip)
     session.commit()
+    log.info("Session %s unskipped", plan_id)
     return {"plan_id": plan_id, "skipped": False}
 
 
@@ -147,21 +154,28 @@ def create_activity(session: Session, values: dict[str, Any]) -> dict[str, Any]:
     activity = ActivityLog(**values)
     session.add(activity)
     session.commit()
+    log.info("Activity %s created: %s on %s (plan %s)", activity.activity_id, activity.category,
+             activity.activity_date, activity.plan_id or "none")
     return _activity(activity)
 
 
 def update_activity(session: Session, activity_id: int, values: dict[str, Any]) -> dict[str, Any]:
     activity = _get_activity(session, activity_id)
     _check_plan_id(session, values.get("plan_id"))
+    changed = []
     for column, value in values.items():
-        setattr(activity, column, value)
+        if getattr(activity, column) != value:
+            changed.append(column)
+            setattr(activity, column, value)
     session.commit()
+    log.info("Activity %s updated: %s", activity_id, ", ".join(changed) or "nothing changed")
     return _activity(activity)
 
 
 def delete_activity(session: Session, activity_id: int) -> dict[str, Any]:
     session.delete(_get_activity(session, activity_id))
     session.commit()
+    log.info("Activity %s deleted", activity_id)
     return {"deleted": activity_id}
 
 
@@ -245,6 +259,7 @@ def revert_history(session: Session, history_id: int) -> dict[str, Any]:
         )
         session.get(ActivityHistory, new_entry_id).reverted_entry = history_id
         session.commit()
+        log.info("History entry %s reverted (%s of activity %s)", history_id, entry.action, activity_id)
     except IntegrityError as e:
         session.rollback()
         raise ConflictError(f"Can't revert: {e.orig}") from e

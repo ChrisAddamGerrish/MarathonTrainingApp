@@ -4,6 +4,7 @@ __pycache__/
 .venv/
 
 # Project exclude paths
+/logs/
 /frontend/dist/
 /frontend/node_modules/
 /frontend/node_modules/@vitejs/plugin-react/LICENSE
