@@ -1,4 +1,4 @@
-import { STATUS } from "../lib/format";
+import { STATUS } from "../utils/format";
 
 export const Chip = ({ category }) => (
   <span className="chip" data-cat={category}>

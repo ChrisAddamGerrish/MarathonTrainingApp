@@ -1,15 +1,9 @@
-"""Database triggers that record every change to activity_log in activity_history.
-
-Triggers live in the database, so edits made outside this app (PyCharm's DB tool, scripts, the
-sqlite3 CLI) are captured too. SQLAlchemy has no construct for CREATE TRIGGER, so that wrapper is
-the one piece of raw DDL in the project; the trigger *bodies* and conditions are built from
-SQLAlchemy expressions, so the column list lives in one place (models.ACTIVITY_COLUMNS).
-"""
+"""Database triggers that record every change to activity_log in activity_history."""
 from sqlalchemy import Connection, func, insert, literal_column, or_
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.sql import ClauseElement
 
-from models import ACTIVITY_COLUMNS, ActivityHistory, ActivityLog
+from backend.app.models.models import ACTIVITY_COLUMNS, ActivityHistory, ActivityLog
 
 _HISTORY = ActivityHistory.__table__
 _SOURCE = ActivityLog.__tablename__

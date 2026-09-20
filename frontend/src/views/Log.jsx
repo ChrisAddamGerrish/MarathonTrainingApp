@@ -1,6 +1,6 @@
-import { useData } from "../DataContext";
-import { useDialogs } from "../Dialogs";
-import { CATEGORIES, fmtDate, fmtMi, fmtMin, isRun, pace } from "../lib/format";
+import { useData } from "../contexts/DataContext";
+import { useDialogs } from "../contexts/DialogContext";
+import { CATEGORIES, fmtDate, fmtMi, fmtMin, isRun, pace } from "../utils/format";
 import { Chip, ClickableRow } from "../components/common";
 
 const Dash = () => <span className="muted">—</span>;

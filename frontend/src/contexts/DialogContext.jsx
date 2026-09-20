@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
-import ActivityDialog from "./components/ActivityDialog";
+import ActivityDialog from "../components/ActivityDialog";
 import { useData } from "./DataContext";
-import { useToast } from "./Toast";
+import { useToast } from "./ToastContext";
 
 const DialogContext = createContext(null);
 

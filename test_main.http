@@ -1,4 +1,4 @@
-# Test the Marathon API (run the app: uvicorn main:app --reload)
+# Test the Marathon API (run the app: uvicorn backend.app.main:app --reload)
 
 GET http://127.0.0.1:8000/api/data
 Accept: application/json

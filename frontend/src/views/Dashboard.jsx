@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useData } from "../DataContext";
-import { useDialogs } from "../Dialogs";
-import { activityStats, fmtDate, focusWeek } from "../lib/format";
+import { useData } from "../contexts/DataContext";
+import { useDialogs } from "../contexts/DialogContext";
+import { activityStats, fmtDate, focusWeek } from "../utils/format";
 import { Chip } from "../components/common";
 import WeekDetail from "../components/WeekDetail";
 import WeeklyChart from "../components/WeeklyChart";

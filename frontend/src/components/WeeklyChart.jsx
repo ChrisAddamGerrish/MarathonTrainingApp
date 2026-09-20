@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { fmtMin } from "../lib/format";
+import { fmtMin } from "../utils/format";
 
 const H = 250;
 const M = { l: 34, r: 6, t: 14, b: 28 };

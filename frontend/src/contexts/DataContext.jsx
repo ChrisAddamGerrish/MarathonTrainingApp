@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { api } from "./api";
+import { api } from "../services/api";
 
 const DataContext = createContext(null);
 

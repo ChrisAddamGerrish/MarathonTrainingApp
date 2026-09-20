@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { api, jsonRequest } from "../api";
-import { useData } from "../DataContext";
-import { useDialogs } from "../Dialogs";
-import { DAYS, fmtDate, fmtMi, fmtMin, fmtSigned, isRun, pace } from "../lib/format";
-import { useToast } from "../Toast";
+import { api, jsonRequest } from "../services/api";
+import { useData } from "../contexts/DataContext";
+import { useDialogs } from "../contexts/DialogContext";
+import { DAYS, fmtDate, fmtMi, fmtMin, fmtSigned, isRun, pace } from "../utils/format";
+import { useToast } from "../contexts/ToastContext";
 import { Chip, ProgressBar, StatusPill } from "./common";
 
 const joinParts = parts => parts.filter(Boolean).join(" · ");
