@@ -95,7 +95,7 @@ try {
         if (-not (Test-Path -LiteralPath $Python)) { return $false }
         $previous = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        & $Python -c "import fastapi, uvicorn" 2>$null
+        & $Python -c "import fastapi, sqlalchemy, uvicorn" 2>$null
         $ok = ($LASTEXITCODE -eq 0)
         $ErrorActionPreference = $previous
         return $ok
