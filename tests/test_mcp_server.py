@@ -2,26 +2,18 @@
 
 Run from the project root:   .venv\\Scripts\\python.exe -m unittest tests.test_mcp_server -v
 
-Everything runs against a temporary COPY of marathon.db, never the real file. The copy is made
-and MARATHON_DB is pointed at it before any backend module is imported, because the database
-engine is created at import time.
+Everything runs against the temporary database copy and log folder set up in tests/__init__.py.
 """
 import json
 import os
 import queue
-import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-_TMP = Path(tempfile.mkdtemp(prefix="marathon-mcp-test-"))
-TEST_DB = _TMP / "marathon.db"
-shutil.copy(ROOT / "marathon.db", TEST_DB)
-os.environ["MARATHON_DB"] = str(TEST_DB)
+from tests import LOG_DIR, ROOT, TEST_DB  # noqa: F401  (importing tests points the backend at the temp copies)
 
 from mcp import Client  # noqa: E402
 
@@ -42,8 +34,7 @@ def setUpModule():
 
 
 def tearDownModule():
-    engine.dispose()
-    shutil.rmtree(_TMP, ignore_errors=True)
+    engine.dispose()  # release the temp database file so it can be deleted at exit
 
 
 class ToolFailed(Exception):
@@ -184,6 +175,26 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 await call(client, "skip_planned_session", plan_id=rest["plan_id"])
 
 
+class ToolLoggingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_each_call_is_logged_with_arguments_and_outcome(self):
+        async with open_client() as client:
+            with self.assertLogs("marathon.mcp", "INFO") as logs:
+                await call(client, "list_activities", limit=2, week=1)
+                with self.assertRaises(ToolFailed):
+                    await call(client, "get_week", week=999)
+        ok, refused = logs.records
+        self.assertEqual((ok.levelname, refused.levelname), ("INFO", "WARNING"))
+        self.assertRegex(ok.getMessage(), r"^list_activities\(limit=2, week=1\) ok in \d+ ms$")
+        self.assertRegex(refused.getMessage(), r"^get_week\(week=999\) refused: Week 999 is not in the plan")
+
+    async def test_long_values_are_shortened_in_the_log(self):
+        async with open_client() as client:
+            with self.assertLogs("marathon.mcp", "INFO") as logs:
+                created = await call(client, "log_activity", **new_run(actual_session="x" * 500))
+                await call(client, "delete_activity", activity_id=created["activity_id"])
+        self.assertLess(len(logs.records[0].getMessage()), 300)
+
+
 class StdioTests(unittest.TestCase):
     """Launch it the way an MCP client does: `python -m backend.mcp_server` over stdio."""
 
@@ -218,6 +229,7 @@ class StdioTests(unittest.TestCase):
                 proc.kill()
                 proc.wait()
             proc.stdout.close()
+        self.assertIn("marathon MCP server starting", (LOG_DIR / "mcp_server.log").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
