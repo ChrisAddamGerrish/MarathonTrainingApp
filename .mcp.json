@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "marathon": {
+      "command": ".venv/Scripts/python.exe",
+      "args": ["-m", "backend.mcp_server"]
+    }
+  }
+}

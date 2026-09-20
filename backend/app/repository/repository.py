@@ -133,6 +133,10 @@ def _get_activity(session: Session, activity_id: int) -> ActivityLog:
     return activity
 
 
+def get_activity(session: Session, activity_id: int) -> dict[str, Any]:
+    return _activity(_get_activity(session, activity_id))
+
+
 def _check_plan_id(session: Session, plan_id: Optional[str]) -> None:
     if plan_id and session.get(TrainingPlan, plan_id) is None:
         raise UnprocessableError(f"Unknown plan session '{plan_id}'")
