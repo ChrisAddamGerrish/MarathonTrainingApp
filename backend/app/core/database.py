@@ -1,4 +1,5 @@
 """Database engine, session management, and schema initialization."""
+import logging
 from typing import Iterator
 
 from sqlalchemy import Connection, Table, create_engine, event, inspect
@@ -9,6 +10,8 @@ from sqlalchemy.schema import CreateColumn
 from backend.app.core.config import DB_PATH
 from backend.app.models.models import ActivityHistory, Base, PlanSkip
 from backend.app.services.triggers import install_history_triggers
+
+log = logging.getLogger("marathon.db")
 
 # check_same_thread=False: FastAPI may run a request's dependency and its endpoint in different
 # worker threads; each request still gets its own session (and so its own connection).
@@ -43,6 +46,7 @@ def _add_missing_columns(conn: Connection, table: Table) -> None:
         if column.name not in existing:
             definition = CreateColumn(column).compile(dialect=conn.dialect)
             conn.exec_driver_sql(f"ALTER TABLE {table.name} ADD COLUMN {definition}")
+            log.info("Added missing column %s.%s", table.name, column.name)
 
 
 def init_db() -> None:

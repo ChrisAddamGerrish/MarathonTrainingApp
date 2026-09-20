@@ -13,18 +13,27 @@ the history triggers live in the database, so changes made here show up in the H
 be reverted from there like any other change.
 
 stdout is the protocol channel: never print() in this module (log to stderr instead).
+
+Logging: every tool call is logged (name, arguments, outcome, duration), and so are the data changes
+the repository makes. Records go to stderr, which most clients discard, and to logs/mcp_server.log
+(see core/logging_config.py; $MARATHON_LOG_DIR and $MARATHON_LOG_LEVEL change where and how much).
 """
+import functools
+import logging
+import time
 from contextlib import contextmanager
 from datetime import date
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Callable, Optional
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, ValidationError
 
+from backend.app.core import config
 from backend.app.core.database import SessionLocal, init_db
 from backend.app.core.errors import AppError
+from backend.app.core.logging_config import setup_logging
 from backend.app.models.models import ACTIVITY_COLUMNS
 from backend.app.repository import repository as repo
 from backend.app.schemas.schemas import ActivityIn, Category
@@ -40,9 +49,34 @@ mcp = MCPServer(
     ),
 )
 
+log = logging.getLogger("marathon.mcp")
+
 READ = ToolAnnotations(read_only_hint=True)
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False)
 DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True)
+
+
+def tool(annotations: ToolAnnotations) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Register a function as an MCP tool and log each call: arguments, outcome and duration.
+    Argument-validation failures happen before this runs and are logged by the MCP library."""
+    def register(fn: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(fn)  # keeps the signature and docstring the client sees
+        def logged(*args: Any, **kwargs: Any) -> Any:
+            shown = ", ".join(f"{k}={v!r:.60}" for k, v in kwargs.items() if v is not None)
+            started = time.perf_counter()
+            try:
+                result = fn(*args, **kwargs)
+            except ToolError as e:  # the client is told why
+                log.warning("%s(%s) refused: %s", fn.__name__, shown, e)
+                raise
+            except Exception:  # the client only sees a generic error, so keep the traceback here
+                log.exception("%s(%s) crashed", fn.__name__, shown)
+                raise
+            log.info("%s(%s) ok in %.0f ms", fn.__name__, shown, (time.perf_counter() - started) * 1000)
+            return result
+        return mcp.tool(annotations=annotations)(logged)
+    return register
+
 
 # What get_week reports for each planned session.
 _SESSION_FIELDS = (
@@ -74,7 +108,7 @@ def _activity_values(**fields: Any) -> dict[str, Any]:
 # Read
 # --------------------------------------------------------------------------
 
-@mcp.tool(annotations=READ)
+@tool(READ)
 def get_summary() -> dict[str, Any]:
     """Race countdown, current training week, miles run, plan adherence and skipped sessions."""
     with db() as s:
@@ -84,7 +118,7 @@ def get_summary() -> dict[str, Any]:
         return planning.build_summary(plan, acts, planning.build_weeks(plan, acts), today)
 
 
-@mcp.tool(annotations=READ)
+@tool(READ)
 def get_week(week: Optional[int] = None) -> dict[str, Any]:
     """One training week (default: the current week): its totals, every planned session with its
     plan_id, status (done / missed / upcoming / skipped ...) and what was logged, plus activities
@@ -106,7 +140,7 @@ def get_week(week: Optional[int] = None) -> dict[str, Any]:
         }
 
 
-@mcp.tool(annotations=READ)
+@tool(READ)
 def list_activities(
     limit: Annotated[int, Field(ge=1, le=200)] = 20,
     week: Optional[int] = None,
@@ -122,7 +156,7 @@ def list_activities(
     return rows[:limit]
 
 
-@mcp.tool(annotations=READ)
+@tool(READ)
 def list_history(
     limit: Annotated[int, Field(ge=1, le=200)] = 10,
     activity_id: Optional[int] = None,
@@ -137,7 +171,7 @@ def list_history(
 # Write
 # --------------------------------------------------------------------------
 
-@mcp.tool(annotations=WRITE)
+@tool(WRITE)
 def log_activity(
     activity_date: date,
     category: Category,
@@ -154,7 +188,7 @@ def log_activity(
         return repo.create_activity(s, values)
 
 
-@mcp.tool(annotations=WRITE)
+@tool(WRITE)
 def update_activity(
     activity_id: int,
     activity_date: Optional[date] = None,
@@ -176,7 +210,7 @@ def update_activity(
         return repo.update_activity(s, activity_id, values)
 
 
-@mcp.tool(annotations=WRITE)
+@tool(WRITE)
 def skip_planned_session(plan_id: str, reason: Optional[str] = None) -> dict[str, Any]:
     """Mark a planned session as deliberately skipped. It then counts neither as done nor missed.
     Not allowed for rest days or sessions that already have a logged activity."""
@@ -184,7 +218,7 @@ def skip_planned_session(plan_id: str, reason: Optional[str] = None) -> dict[str
         return repo.skip_session(s, plan_id, reason)
 
 
-@mcp.tool(annotations=WRITE)
+@tool(WRITE)
 def unskip_planned_session(plan_id: str) -> dict[str, Any]:
     """Remove the skip from a planned session."""
     with db() as s:
@@ -195,7 +229,7 @@ def unskip_planned_session(plan_id: str) -> dict[str, Any]:
 # Destructive (recoverable through history)
 # --------------------------------------------------------------------------
 
-@mcp.tool(annotations=DESTRUCTIVE)
+@tool(DESTRUCTIVE)
 def delete_activity(activity_id: int) -> dict[str, Any]:
     """Delete an activity. The deletion is recorded in history and can be undone with
     revert_history_entry."""
@@ -203,7 +237,7 @@ def delete_activity(activity_id: int) -> dict[str, Any]:
         return repo.delete_activity(s, activity_id)
 
 
-@mcp.tool(annotations=DESTRUCTIVE)
+@tool(DESTRUCTIVE)
 def revert_history_entry(history_id: int) -> dict[str, Any]:
     """Undo one history entry (find ids with list_history). An add is removed, a delete is
     restored, and an edit puts back the old value of just the fields that edit changed."""
@@ -212,5 +246,10 @@ def revert_history_entry(history_id: int) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
+    setup_logging("mcp_server.log")
     init_db()
-    mcp.run()  # stdio
+    log.info("marathon MCP server starting (db %s)", config.DB_PATH)
+    try:
+        mcp.run()  # stdio
+    finally:
+        log.info("marathon MCP server stopped")
