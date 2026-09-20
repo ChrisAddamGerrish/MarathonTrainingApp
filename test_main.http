@@ -1,0 +1,35 @@
+# Test the Marathon API (run the app: uvicorn main:app --reload)
+
+GET http://127.0.0.1:8000/api/data
+Accept: application/json
+
+###
+
+POST http://127.0.0.1:8000/api/activities
+Content-Type: application/json
+
+{
+  "activity_date": "2026-09-20",
+  "category": "Run",
+  "actual_session": "Long Run",
+  "distance_mi": 8,
+  "duration_min": 76,
+  "plan_id": "W1-Sun"
+}
+
+###
+
+PUT http://127.0.0.1:8000/api/activities/1
+Content-Type: application/json
+
+{
+  "activity_date": "2026-09-14",
+  "category": "Strength",
+  "actual_session": "Total Strength 30min — Andy Speer",
+  "duration_min": 30,
+  "plan_id": "W1-Mon"
+}
+
+###
+
+DELETE http://127.0.0.1:8000/api/activities/15
