@@ -6,7 +6,12 @@
   1. Makes sure the Python environment (.venv) exists and has the app's dependencies.
   2. Makes sure the React front end is built (installs npm packages / rebuilds when the
      source is newer than the last build).
-  3. Runs the FastAPI server, waits until it answers, then opens the browser.
+  3. Makes sure the web app has a login (the first run asks for a username and password,
+     saved to auth.env as a hash). The app shows its own sign-in page.
+  4. Runs the FastAPI server, waits until it answers, then opens the browser.
+  5. Runs the Caddy reverse proxy (see Caddyfile) so the app can be reached from other
+     devices. Caddy is installed with winget if it is missing, and the first run asks where
+     to listen (saved to caddy.env).
   Press Ctrl+C in this window to stop it.
 
   Written for Windows PowerShell 5.1 and PowerShell 7. Double-click start.bat if scripts
@@ -20,10 +25,17 @@
 
 .PARAMETER Dev
   Development mode: server auto-reloads on Python changes, and the Vite dev server runs
-  (hot reload for the React code) at http://localhost:5173.
+  (hot reload for the React code) at http://localhost:5173. The Caddy proxy is not started.
 
 .PARAMETER Rebuild
   Force a fresh front end build.
+
+.PARAMETER LocalOnly
+  Don't start the Caddy proxy; the app is only reachable from this PC.
+
+.PARAMETER ResetLogin
+  Ask for a new username and password for the app's sign-in page. Works while the app is
+  running, and signs out every device.
 
 .EXAMPLE
   .\start.ps1
@@ -31,13 +43,19 @@
   .\start.ps1 -Dev
 .EXAMPLE
   .\start.ps1 -Port 8100 -NoBrowser
+.EXAMPLE
+  .\start.ps1 -LocalOnly
+.EXAMPLE
+  .\start.ps1 -ResetLogin
 #>
 [CmdletBinding()]
 param(
     [int]$Port = 8000,
     [switch]$NoBrowser,
     [switch]$Dev,
-    [switch]$Rebuild
+    [switch]$Rebuild,
+    [switch]$LocalOnly,
+    [switch]$ResetLogin
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,6 +69,8 @@ try {
     $DistIndex = Join-Path $Frontend 'dist\index.html'
     $Python = Join-Path $Root '.venv\Scripts\python.exe'
     $Url = "http://localhost:$Port"
+    $CaddyFile = Join-Path $Root 'Caddyfile'
+    $CaddyEnv = Join-Path $Root 'caddy.env'
 
     function Write-Step($message) { Write-Host "==> $message" -ForegroundColor Cyan }
 
@@ -60,14 +80,24 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE)." }
     }
 
-    # True when something answers with this app's data on the port.
+    # True when this app answers on the port (the health check needs no sign-in).
     function Test-MarathonUp([int]$P) {
         try {
-            $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:$P/api/data"
-            return ($r.StatusCode -eq 200 -and $r.Content -like '*plan_start*')
+            $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:$P/api/health"
+            return ($r.StatusCode -eq 200 -and $r.Content -like '*"app":"marathon"*')
         } catch {
             return $false
         }
+    }
+
+    # Run a native command that writes to stderr, returning its combined output. Windows
+    # PowerShell 5.1 turns redirected stderr into terminating errors under 'Stop'.
+    function Invoke-Captured([string]$What, [scriptblock]$Command) {
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { $output = & $Command 2>&1 | ForEach-Object { "$_" } } finally { $ErrorActionPreference = $previous }
+        if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE):`n$($output -join "`n")" }
+        return $output
     }
 
     # Kill a process and everything it started (npm.cmd -> node).
@@ -77,17 +107,55 @@ try {
         }
     }
 
-    # --- Already running? ----------------------------------------------------------------
-    $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($listener) {
-        if (Test-MarathonUp $Port) {
-            Write-Host "Marathon is already running at $Url" -ForegroundColor Green
-            if (-not $NoBrowser) { Start-Process $Url }
-            exit 0
+    # --- Reverse proxy (Caddy) ------------------------------------------------------------
+    # The proxy fronts the built app, so dev mode (Vite on :5173) runs without it.
+    $UseProxy = -not ($LocalOnly -or $Dev)
+    $caddyExe = $null
+    if ($UseProxy) {
+        # PATH first, then winget's folders: a winget install doesn't always add caddy to PATH.
+        function Find-Caddy {
+            $cmd = Get-Command caddy -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            $roots = @("$env:LOCALAPPDATA\Microsoft\WinGet", "$env:ProgramFiles\WinGet") | ForEach-Object { "$_\Links", "$_\Packages" }
+            return Get-ChildItem -LiteralPath $roots -Recurse -Filter caddy.exe -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty FullName
         }
-        $owner = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
-        $name = if ($owner) { $owner.ProcessName } else { 'another program' }
-        throw "Port $Port is in use by $name (PID $($listener.OwningProcess)). Stop it, or run: .\start.ps1 -Port <other port>"
+
+        $caddyExe = Find-Caddy
+        if (-not $caddyExe) {
+            if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+                throw 'Caddy was not found. Install it from https://caddyserver.com/download (or run with -LocalOnly).'
+            }
+            Write-Step 'Installing Caddy (winget install CaddyServer.Caddy)'
+            winget install --id CaddyServer.Caddy --exact --source winget --accept-package-agreements --accept-source-agreements
+            # 0x8A15002B: already installed and up to date.
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { throw "winget install failed (exit code $LASTEXITCODE)." }
+            # winget updates PATH for new terminals only, so reload it for this one.
+            $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+            $caddyExe = Find-Caddy
+            if (-not $caddyExe) { throw 'Caddy was installed but could not be found. Open a new terminal and run this again.' }
+        }
+
+        if (-not (Test-Path -LiteralPath $CaddyEnv)) {
+            Write-Step 'Setting up the Caddy proxy (saved to caddy.env)'
+            $site = Read-Host 'Domain name for HTTPS (leave blank to serve plain HTTP on port 8080)'
+            if (-not $site) { $site = ':8080' }
+            # Let's Encrypt only issues for real public domains; home-network names need Caddy's own CA.
+            $tls = 'public'
+            if ($site -notlike ':*') {
+                $answer = Read-Host "Is $site a public domain whose DNS points at your internet IP? (y/N)"
+                if ($answer -notmatch '^(y|yes)$') { $tls = 'internal' }
+            }
+            Set-Content -LiteralPath $CaddyEnv -Encoding ascii -Value @(
+                '# Created by start.ps1. Delete this file to choose again.'
+                "MARATHON_SITE=$site"
+                "MARATHON_TLS=$tls"
+            )
+        }
+
+        $env:MARATHON_APP_PORT = "$Port"
+        $null = Invoke-Captured 'Checking the Caddyfile' { & $caddyExe validate --config $CaddyFile --adapter caddyfile --envfile $CaddyEnv }
+        $publicSite = ((Get-Content -LiteralPath $CaddyEnv) -match '^MARATHON_SITE=' | Select-Object -Last 1) -replace '^MARATHON_SITE=', ''
     }
 
     # --- Python environment --------------------------------------------------------------
@@ -117,6 +185,29 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Could not read dependencies from pyproject.toml.' }
             Invoke-Native 'pip install' { & $Python -m pip install --disable-pip-version-check @($deps) }
         }
+    }
+
+    # --- Web app login -----------------------------------------------------------------------
+    # auth.env holds the sign-in page's login (see backend/app/core/auth.py). The app re-reads it
+    # when it changes, so a reset applies straight away, even while the app is running.
+    $AuthFile = Join-Path $Root 'auth.env'
+    $hasLogin = (Test-Path -LiteralPath $AuthFile) -and [bool]((Get-Content -LiteralPath $AuthFile) -match '^MARATHON_PASSWORD_HASH=.')
+    if ($ResetLogin -or -not $hasLogin) {
+        Write-Step $(if ($hasLogin) { 'Changing the sign-in login (auth.env)' } else { 'Setting up the sign-in login (saved to auth.env)' })
+        Invoke-Native 'Saving the login' { & $Python -m backend.app.core.auth }
+    }
+
+    # --- Already running? ----------------------------------------------------------------
+    $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($listener) {
+        if (Test-MarathonUp $Port) {
+            Write-Host "Marathon is already running at $Url" -ForegroundColor Green
+            if (-not $NoBrowser) { Start-Process $Url }
+            exit 0
+        }
+        $owner = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
+        $name = if ($owner) { $owner.ProcessName } else { 'another program' }
+        throw "Port $Port is in use by $name (PID $($listener.OwningProcess)). Stop it, or run: .\start.ps1 -Port <other port>"
     }
 
     # --- Front end -------------------------------------------------------------------------
@@ -151,6 +242,7 @@ try {
     # --- Run -----------------------------------------------------------------------------------
     $vite = $null
     $server = $null
+    $proxy = $null
     try {
         Write-Step "Starting the server on $Url"
         $uvicornArgs = @('-m', 'uvicorn', 'backend.app.main:app', '--port', "$Port")
@@ -174,14 +266,27 @@ try {
             Start-Sleep -Milliseconds 300
         }
 
+        if ($UseProxy) {
+            Write-Step "Starting the Caddy reverse proxy on $publicSite"
+            $proxy = Start-Process -FilePath $caddyExe -ArgumentList @('run', '--config', "`"$CaddyFile`"", '--adapter', 'caddyfile', '--envfile', "`"$CaddyEnv`"") -WorkingDirectory $Root -NoNewWindow -PassThru
+            $null = $proxy.Handle
+            Start-Sleep -Seconds 2
+            if ($proxy.HasExited) { throw "Caddy stopped unexpectedly (exit code $($proxy.ExitCode)). See the messages above." }
+        }
+
         Write-Host ''
         Write-Host "Marathon is running at $openUrl" -ForegroundColor Green
+        if ($UseProxy) {
+            $shown = if ($publicSite -like ':*') { "http://<this PC's IP>$publicSite" } else { "https://$publicSite" }
+            Write-Host "Reachable from other devices at $shown (login required)" -ForegroundColor Green
+        }
         Write-Host 'Press Ctrl+C to stop.'
         Write-Host ''
         if (-not $NoBrowser) { Start-Process $openUrl }
 
         $server.WaitForExit()
     } finally {
+        Stop-Tree $proxy
         Stop-Tree $vite
         Stop-Tree $server
     }

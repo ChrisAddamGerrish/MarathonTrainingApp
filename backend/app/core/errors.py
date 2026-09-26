@@ -21,3 +21,17 @@ class ConflictError(AppError):
 
 class UnprocessableError(AppError):
     status_code = 422
+
+
+class UnauthorizedError(AppError):
+    """Not signed in, or the sign-in details were wrong."""
+
+    status_code = 401
+
+
+class TooManyAttemptsError(AppError):
+    status_code = 429
+
+
+class NotConfiguredError(AppError):
+    status_code = 503
