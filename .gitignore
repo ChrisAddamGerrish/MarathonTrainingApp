@@ -19,3 +19,8 @@ __pycache__/
 /caddy.env
 # Web app login (see backend/app/core/auth.py)
 /auth.env
+# Strava API app settings and tokens (see backend/app/services/strava.py)
+/strava.env
+/strava_tokens.json
+# Copies the app makes before changing the database's structure
+/backups/

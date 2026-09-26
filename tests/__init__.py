@@ -4,7 +4,8 @@
 point it at the temp copies, and the modules' setUpModule guards then refuse to run.)
 
 Every test module runs against a temporary COPY of marathon.db, writes its logs to a temporary
-folder and signs in with a temporary login (TEST_USER / TEST_PASSWORD), never the real ones. The environment has to be pointed at them before any backend module is
+folder, signs in with a temporary login (TEST_USER / TEST_PASSWORD) and keeps Strava settings and
+tokens in temporary files, never the real ones. The environment has to be pointed at them before any backend module is
 imported (the database engine is created at import time), which is why this lives here: importing
 any tests.* module imports this package first.
 """
@@ -26,6 +27,8 @@ shutil.copy(ROOT / "marathon.db", TEST_DB)
 os.environ["MARATHON_DB"] = str(TEST_DB)
 os.environ["MARATHON_LOG_DIR"] = str(LOG_DIR)
 os.environ["MARATHON_AUTH_FILE"] = str(AUTH_FILE)
+os.environ["MARATHON_STRAVA_CONFIG"] = str(TMP / "strava.env")
+os.environ["MARATHON_STRAVA_TOKENS"] = str(TMP / "strava_tokens.json")
 atexit.register(shutil.rmtree, TMP, ignore_errors=True)
 
 

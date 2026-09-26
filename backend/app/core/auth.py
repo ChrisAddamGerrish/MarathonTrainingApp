@@ -82,15 +82,6 @@ def verify_password(password: str, stored: str) -> bool:
 _cache: tuple[Optional[float], Optional[Credentials]] = (None, None)
 
 
-def _read_file() -> dict[str, str]:
-    values = {}
-    for line in config.AUTH_FILE.read_text(encoding="utf-8").splitlines():
-        if "=" in line and not line.lstrip().startswith("#"):
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip()
-    return values
-
-
 def load_credentials() -> Optional[Credentials]:
     """The configured login, or None if the login file is missing or incomplete."""
     global _cache
@@ -99,7 +90,7 @@ def load_credentials() -> Optional[Credentials]:
     except OSError:
         return None
     if _cache[0] != mtime:
-        values = _read_file()
+        values = config.read_env_file(config.AUTH_FILE)
         user, password_hash, secret = (values.get(k) for k in
                                        ("MARATHON_USER", "MARATHON_PASSWORD_HASH", "MARATHON_SECRET_KEY"))
         _cache = (mtime, Credentials(user, password_hash, secret) if user and password_hash and secret else None)

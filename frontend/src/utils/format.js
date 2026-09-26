@@ -25,7 +25,9 @@ export const pace = (mi, min) => {
 
 export const isRun = c => c === "Run" || c === "Race";
 
-export const CATEGORIES = ["Run", "Bike", "Strength", "Row", "Race", "Rest"];
+// A logged activity can be a Stretch; a planned session can't (the plan table doesn't allow it).
+export const PLAN_CATEGORIES = ["Run", "Bike", "Strength", "Row", "Race", "Rest"];
+export const CATEGORIES = [...PLAN_CATEGORIES.slice(0, 3), "Stretch", ...PLAN_CATEGORIES.slice(3)];
 
 export const STATUS = {
   done: { icon: "✓", label: "Done" },

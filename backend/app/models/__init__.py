@@ -5,6 +5,7 @@ from backend.app.models.models import (
     Base,
     PlanSkip,
     PlanVsActual,
+    StravaImport,
     TrainingPlan,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "Base",
     "PlanSkip",
     "PlanVsActual",
+    "StravaImport",
     "TrainingPlan",
 ]

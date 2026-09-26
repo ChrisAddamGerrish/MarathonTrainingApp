@@ -17,9 +17,10 @@ from backend.app.models.models import (
     ActivityLog,
     PlanSkip,
     PlanVsActual,
+    StravaImport,
     TrainingPlan,
 )
-from backend.app.services.planning import week_of
+from backend.app.services.planning import DAYS, RUN_CATEGORIES, week_of
 
 log = logging.getLogger("marathon.repo")
 
@@ -113,6 +114,89 @@ def skip_session(session: Session, plan_id: str, reason: Optional[str]) -> dict[
     return {"plan_id": plan_id, "skipped": True, "reason": reason}
 
 
+def _plan_row(session: Session, plan_id: str) -> dict[str, Any]:
+    row = next((r for r in plan_rows(session) if r["plan_id"] == plan_id), None)
+    if row is None:
+        raise NotFoundError(f"Unknown plan session '{plan_id}'")
+    return row
+
+
+def _get_plan(session: Session, plan_id: str) -> TrainingPlan:
+    plan = session.get(TrainingPlan, plan_id)
+    if plan is None:
+        raise NotFoundError(f"Unknown plan session '{plan_id}'")
+    return plan
+
+
+def _week_type(session: Session, week: int) -> str:
+    week_type = session.scalar(select(TrainingPlan.week_type).where(TrainingPlan.week == week).limit(1))
+    if week_type is None:
+        raise NotFoundError(f"The plan has no week {week}")
+    return week_type
+
+
+def _new_plan_id(session: Session, week: int, day: str) -> str:
+    """W3-Tue, or W3-Tue-2, -3... when that is taken. Ids never change afterwards, even if the
+    session moves to another day: activities and skips refer to them."""
+    base, n = f"W{week}-{day}", 1
+    plan_id = base
+    while session.get(TrainingPlan, plan_id) is not None:
+        n += 1
+        plan_id = f"{base}-{n}"
+    return plan_id
+
+
+def _drop_skip_if_rest(session: Session, plan: TrainingPlan) -> None:
+    # Rest days can't be skipped, so a session turned into a rest day loses its skip.
+    if plan.category == "Rest" and plan.skip is not None:
+        session.delete(plan.skip)
+
+
+def create_plan_session(session: Session, week: int, values: dict[str, Any]) -> dict[str, Any]:
+    plan = TrainingPlan(plan_id=_new_plan_id(session, week, values["day"]), week=week,
+                        week_type=_week_type(session, week), **values)
+    session.add(plan)
+    session.commit()
+    log.info("Plan session %s added: %s on W%s %s", plan.plan_id, plan.planned_session, week, plan.day)
+    return _plan_row(session, plan.plan_id)
+
+
+def update_plan_session(session: Session, plan_id: str, values: dict[str, Any]) -> dict[str, Any]:
+    plan = _get_plan(session, plan_id)
+    changed = []
+    for column, value in values.items():
+        if getattr(plan, column) != value:
+            changed.append(column)
+            setattr(plan, column, value)
+    _drop_skip_if_rest(session, plan)
+    session.commit()
+    log.info("Plan session %s updated: %s", plan_id, ", ".join(changed) or "nothing changed")
+    return _plan_row(session, plan_id)
+
+
+def delete_plan_session(session: Session, plan_id: str) -> dict[str, Any]:
+    plan = _get_plan(session, plan_id)
+    if plan.activities:
+        n = len(plan.activities)
+        raise ConflictError(f"{n} logged {'activity counts' if n == 1 else 'activities count'} toward this session. "
+                            "Link them to another session (or unlink them) in the Activity log first.")
+    if plan.skip is not None:
+        session.delete(plan.skip)
+    session.delete(plan)
+    session.commit()
+    log.info("Plan session %s deleted (%s)", plan_id, plan.planned_session)
+    return {"deleted": plan_id}
+
+
+def set_week_type(session: Session, week: int, week_type: str) -> dict[str, Any]:
+    _week_type(session, week)  # 404 for a week the plan doesn't have
+    for plan in session.scalars(select(TrainingPlan).where(TrainingPlan.week == week)):
+        plan.week_type = week_type
+    session.commit()
+    log.info("Plan week %s set to %s", week, week_type)
+    return {"week": week, "week_type": week_type}
+
+
 def unskip_session(session: Session, plan_id: str) -> dict[str, Any]:
     skip = session.get(PlanSkip, plan_id)
     if skip is None:
@@ -177,6 +261,113 @@ def delete_activity(session: Session, activity_id: int) -> dict[str, Any]:
     session.commit()
     log.info("Activity %s deleted", activity_id)
     return {"deleted": activity_id}
+
+
+# --------------------------------------------------------------------------
+# Strava imports
+# --------------------------------------------------------------------------
+
+
+def _same_kind(category: str) -> tuple[str, ...]:
+    """Categories treated as the same workout: a race is a run (and a planned run can be raced)."""
+    return RUN_CATEGORIES if category in RUN_CATEGORIES else (category,)
+
+
+def _plan_session_for(session: Session, day: date, category: str, duration_min: Optional[float]) -> Optional[str]:
+    """The planned session an imported workout should count towards, if any.
+
+    Candidates are sessions of the same kind that are neither done nor skipped.
+    1. That day's: the earliest in plan order wins (so two strength sessions fill up in the order
+       they're planned), and optional ones are only used when nothing required is left.
+    2. Otherwise a required one from earlier in the same plan week, the most recent first: a
+       session moved to a later day (Saturday's ride done on Sunday). Never a later day's, so an
+       extra workout can't take the slot of one you still have to do, and only when the workout
+       lasted at least half the session's target, so a short extra can't pass for a missed session.
+    """
+    stmt = (
+        select(TrainingPlan)
+        .where(TrainingPlan.week == week_of(day), TrainingPlan.category.in_(_same_kind(category)))
+        .order_by(TrainingPlan.entry_order)
+    )
+    open_sessions = [p for p in session.scalars(stmt) if not p.activities and p.skip is None]
+    weekday = day.weekday()
+    today = [p for p in open_sessions if DAYS.index(p.day) == weekday]
+    required_today = [p for p in today if not p.planned_session.startswith("Optional")]
+    if required_today or today:
+        return (required_today or today)[0].plan_id
+    moved = [p for p in open_sessions
+             if DAYS.index(p.day) < weekday and not p.planned_session.startswith("Optional")
+             and p.target_duration_min and duration_min and duration_min >= p.target_duration_min / 2]
+    moved.sort(key=lambda p: DAYS.index(p.day), reverse=True)  # stable: plan order within a day
+    return moved[0].plan_id if moved else None
+
+
+def _already_logged(session: Session, day: date, category: str) -> Optional[ActivityLog]:
+    """An activity you logged yourself that day, of the same kind, not yet tied to a Strava one."""
+    claimed = select(StravaImport.activity_id)
+    stmt = (
+        select(ActivityLog)
+        .where(ActivityLog.activity_date == day, ActivityLog.category.in_(_same_kind(category)),
+               ActivityLog.activity_id.not_in(claimed))
+        .order_by(ActivityLog.activity_id)
+    )
+    return session.scalars(stmt).first()
+
+
+def import_strava_activity(session: Session, strava_id: int, values: dict[str, Any]) -> dict[str, Any]:
+    """Bring one Strava activity (already converted to activity_log values) into the log.
+
+    - Seen before (even if you have since deleted it): nothing happens.
+    - You already logged that workout: the two are tied together and your entry is left as is.
+    - Otherwise it is added, linked to a planned session when one fits (see _plan_session_for).
+    """
+    if session.get(StravaImport, strava_id) is not None:
+        return {"strava_id": strava_id, "outcome": "known"}
+
+    existing = _already_logged(session, values["activity_date"], values["category"])
+    if existing is not None:
+        session.add(StravaImport(strava_id=strava_id, outcome="matched", activity_id=existing.activity_id))
+        session.commit()
+        log.info("Strava activity %s matched existing activity %s", strava_id, existing.activity_id)
+        return {"strava_id": strava_id, "outcome": "matched", "activity_id": existing.activity_id}
+
+    plan_id = _plan_session_for(session, values["activity_date"], values["category"], values.get("duration_min"))
+    activity = ActivityLog(**values, plan_id=plan_id)
+    session.add(activity)
+    session.flush()
+    session.add(StravaImport(strava_id=strava_id, outcome="created", activity_id=activity.activity_id))
+    session.commit()
+    log.info("Strava activity %s imported as activity %s: %s on %s (plan %s)", strava_id, activity.activity_id,
+             activity.category, activity.activity_date, plan_id or "none")
+    return {"strava_id": strava_id, "outcome": "created", "activity_id": activity.activity_id, "plan_id": plan_id}
+
+
+def strava_import_for(session: Session, strava_ids: list[int]) -> Optional[dict[str, Any]]:
+    """The first of these Strava activities already dealt with, if any: {strava_id, activity_id}."""
+    record = session.scalars(select(StravaImport).where(StravaImport.strava_id.in_(strava_ids))
+                             .order_by(StravaImport.imported_at, StravaImport.strava_id)).first()
+    return {"strava_id": record.strava_id, "activity_id": record.activity_id} if record else None
+
+
+def tie_strava_duplicate(session: Session, strava_id: int, activity_id: int,
+                         values: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Record a second recording of a workout already in the log (a watch and Peloton both
+    uploading the same ride) against that entry instead of adding it again. Distance and output
+    the entry is missing are filled in from `values`; nothing it already has is changed."""
+    if session.get(StravaImport, strava_id) is not None:
+        return {"strava_id": strava_id, "outcome": "known"}
+    session.add(StravaImport(strava_id=strava_id, outcome="matched", activity_id=activity_id))
+    activity = session.get(ActivityLog, activity_id)
+    filled = []
+    if activity is not None and values:
+        for column in ("distance_mi", "output_kj"):
+            if getattr(activity, column) is None and values.get(column) is not None:
+                setattr(activity, column, values[column])
+                filled.append(column)
+    session.commit()
+    log.info("Strava activity %s is a second recording of activity %s%s", strava_id, activity_id,
+             f" (filled in {', '.join(filled)})" if filled else "")
+    return {"strava_id": strava_id, "outcome": "duplicate", "activity_id": activity_id}
 
 
 # --------------------------------------------------------------------------
