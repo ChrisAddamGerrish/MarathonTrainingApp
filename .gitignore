@@ -15,3 +15,7 @@ __pycache__/
 /frontend/node_modules/react-dom/README.md
 /frontend/node_modules/vite/LICENSE.md
 /frontend/node_modules/vite/README.md
+# Caddy reverse proxy settings (see caddy.env.example)
+/caddy.env
+# Web app login (see backend/app/core/auth.py)
+/auth.env

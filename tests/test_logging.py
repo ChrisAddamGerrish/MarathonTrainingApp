@@ -8,7 +8,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest import mock
 
-from tests import LOG_DIR, TEST_DB, TMP  # noqa: F401  (importing tests points the backend at the temp copies)
+from tests import LOG_DIR, TEST_DB, TMP, signed_in_client  # noqa: F401  (importing tests points the backend at the temp copies)
 
 from fastapi.testclient import TestClient
 
@@ -152,7 +152,7 @@ class WebAppLoggingTests(unittest.TestCase):
         restore_logging_after(self)
 
     def test_a_refused_request_logs_why(self):
-        client = TestClient(app)
+        client = signed_in_client()
         with self.assertLogs("marathon.api", "WARNING") as logs:
             response = client.put("/api/activities/999999", json=a_run())
         self.assertEqual(response.status_code, 404)

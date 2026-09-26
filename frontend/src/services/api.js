@@ -1,6 +1,12 @@
+/** Fired on window when the server says the session is gone, so the app can show the sign-in page. */
+export const SESSION_EXPIRED = "marathon:session-expired";
+
 /** fetch + JSON, turning FastAPI error bodies into readable Error messages. */
 export async function api(path, options) {
   const res = await fetch(path, options);
+  if (res.status === 401 && !path.startsWith("/api/auth/")) {
+    window.dispatchEvent(new Event(SESSION_EXPIRED));
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
