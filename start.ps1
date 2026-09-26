@@ -96,7 +96,10 @@ try {
         $previous = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try { $output = & $Command 2>&1 | ForEach-Object { "$_" } } finally { $ErrorActionPreference = $previous }
-        if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE):`n$($output -join "`n")" }
+        if ($LASTEXITCODE -ne 0) {
+            $detail = $output -join [Environment]::NewLine
+            throw ('{0} failed (exit code {1}):{2}{3}' -f $What, $LASTEXITCODE, [Environment]::NewLine, $detail)
+        }
         return $output
     }
 
@@ -193,7 +196,11 @@ try {
     $AuthFile = Join-Path $Root 'auth.env'
     $hasLogin = (Test-Path -LiteralPath $AuthFile) -and [bool]((Get-Content -LiteralPath $AuthFile) -match '^MARATHON_PASSWORD_HASH=.')
     if ($ResetLogin -or -not $hasLogin) {
-        Write-Step $(if ($hasLogin) { 'Changing the sign-in login (auth.env)' } else { 'Setting up the sign-in login (saved to auth.env)' })
+        if ($hasLogin) {
+            Write-Step 'Changing the sign-in login (auth.env)'
+        } else {
+            Write-Step 'Setting up the sign-in login (saved to auth.env)'
+        }
         Invoke-Native 'Saving the login' { & $Python -m backend.app.core.auth }
     }
 

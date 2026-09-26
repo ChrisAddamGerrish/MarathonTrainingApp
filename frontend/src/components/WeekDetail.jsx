@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { api, jsonRequest } from "../services/api";
 import { useData } from "../contexts/DataContext";
 import { useDialogs } from "../contexts/DialogContext";
@@ -10,6 +10,15 @@ const joinParts = parts => parts.filter(Boolean).join(" · ");
 
 // Sessions that can still be skipped: not done, not a rest day, not an optional slot.
 const CAN_SKIP = new Set(["missed", "today", "upcoming"]);
+
+const STRAVA_NOTE = /^Imported from Strava: (https:\/\/www\.strava\.com\/activities\/\d+)$/;
+
+/** How far a planned session's logged total is from its target ("" when there's no target). */
+function varianceText(r) {
+  if (r.target_distance_mi != null) return fmtSigned(r.distance_variance_mi, "mi");
+  if (r.target_duration_min != null) return fmtSigned(r.duration_variance_min, "min");
+  return "";
+}
 
 /** Reason box inside the skip confirmation. It writes into `target.current` for the confirm handler. */
 function ReasonField({ target }) {
@@ -31,7 +40,9 @@ function ReasonField({ target }) {
   );
 }
 
-function SessionRow({ r, linked }) {
+/** A planned session. `linked` is every workout counting toward it; `underneath` how many of them
+ * were done on its own day and are listed below it (the rest show on the day they were done). */
+function SessionRow({ r, linked, underneath }) {
   const { openLogPlan, openReview } = useDialogs();
   const { reload } = useData();
   const toast = useToast();
@@ -78,24 +89,25 @@ function SessionRow({ r, linked }) {
   }
 
   const isRest = r.category === "Rest";
-  const hasTarget = r.target_distance_mi != null || r.target_duration_min != null;
   const targetTxt = joinParts([
     r.target_distance_mi != null ? fmtMi(r.target_distance_mi) : null,
     r.target_duration_min != null ? fmtMin(r.target_duration_min) : null,
   ]);
   const done = r.linked_activity_count > 0;
-  const actualTxt =
-    joinParts([
-      r.actual_distance_mi > 0 ? fmtMi(r.actual_distance_mi) : null,
-      r.actual_duration_min > 0 ? fmtMin(r.actual_duration_min) : null,
-    ]) || "Logged";
-  const variance =
-    done && hasTarget
-      ? r.target_distance_mi != null
-        ? fmtSigned(r.distance_variance_mi, "mi")
-        : fmtSigned(r.duration_variance_min, "min")
+  // A single workout listed underneath shows its own numbers there; otherwise the total is here.
+  const showTotal = linked.length > 1 || (linked.length === 1 && underneath === 0);
+  const totalTxt =
+    showTotal
+      ? joinParts([
+          r.actual_distance_mi > 0 ? fmtMi(r.actual_distance_mi) : null,
+          r.actual_duration_min > 0 ? fmtMin(r.actual_duration_min) : null,
+        ])
       : "";
+  const variance = showTotal ? varianceText(r) : "";
+  // Workouts done on another day stay on that day; say when here.
+  const elsewhere = [...new Set(linked.filter(a => a.activity_date !== r.date).map(a => a.activity_date))];
   const meta = joinParts([
+    elsewhere.length ? `Done ${elsewhere.map(d => fmtDate(d)).join(", ")}` : null,
     r.run_subtype && r.run_subtype !== "Long Run" ? r.run_subtype : null,
     r.notes,
     r.status === "skipped" && r.skip_reason ? `Skipped: ${r.skip_reason}` : null,
@@ -112,7 +124,7 @@ function SessionRow({ r, linked }) {
         {meta && <div className="sess-meta">{meta}</div>}
       </div>
       <div className="c-target">
-        {!isRest && hasTarget && (
+        {!isRest && targetTxt && (
           <>
             <span className="lbl">Target</span>
             <span className="val num">{targetTxt}</span>
@@ -120,11 +132,11 @@ function SessionRow({ r, linked }) {
         )}
       </div>
       <div className="c-actual">
-        {done && (
+        {totalTxt && (
           <>
-            <span className="lbl">Actual</span>
+            <span className="lbl">Total</span>
             <span className="val num">
-              {actualTxt}
+              {totalTxt}
               {variance && <span className="var">{variance}</span>}
             </span>
           </>
@@ -150,38 +162,54 @@ function SessionRow({ r, linked }) {
           </button>
         )}
       </div>
-      {linked.length > 0 && (
-        <div className="logged">
-          {linked.map(a => (
-            <div key={a.activity_id}>
-              {a.actual_session}
-              {a.distance_mi && isRun(a.category) ? <span className="muted"> · {pace(a.distance_mi, a.duration_min)}</span> : null}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-function ExtraRow({ a }) {
+/** A logged workout, laid out like a planned session and always on the day it was done: indented
+ * under the planned session it counts toward when that is the same day, otherwise at day level,
+ * tagged with the session it counts toward on another day (`countsToward`) or as Unplanned. */
+function WorkoutRow({ a, indented, countsToward, variance }) {
   const { openEdit } = useDialogs();
+  const strava = a.notes?.match(STRAVA_NOTE);
+  const meta = [
+    a.distance_mi && isRun(a.category) ? pace(a.distance_mi, a.duration_min) : null,
+    a.notes && !strava ? a.notes : null,
+  ].filter(Boolean);
   return (
-    <div className="sess extra" data-status="extra">
-      <div>
+    <div className={"sess workout " + (indented ? "linked" : "extra")} data-status="extra">
+      <div className="c-name">
         <div className="sess-name">
-          <Chip category={a.category} />
-          {" "}
-          {a.actual_session}
-          <span className="extra-tag">Unplanned</span>
+          <Chip category={a.category} /> {a.actual_session}
+          {countsToward ? (
+            <span className="extra-tag counts">
+              Counts toward {countsToward.week !== a.week ? `W${countsToward.week} ` : ""}
+              {countsToward.day} · {countsToward.planned_session}
+            </span>
+          ) : (
+            !indented && <span className="extra-tag">Unplanned</span>
+          )}
         </div>
-        {a.notes && <div className="sess-meta">{a.notes}</div>}
+        {(meta.length > 0 || strava) && (
+          <div className="sess-meta">
+            {meta.join(" · ")}
+            {strava && (
+              <>
+                {meta.length > 0 && " · "}
+                <a href={strava[1]} target="_blank" rel="noreferrer">
+                  Strava
+                </a>
+              </>
+            )}
+          </div>
+        )}
       </div>
       <div className="c-target" />
       <div className="c-actual">
         <span className="lbl">Actual</span>
         <span className="val num">
           {joinParts([a.distance_mi ? fmtMi(a.distance_mi) : null, a.duration_min ? fmtMin(a.duration_min) : null]) || "—"}
+          {variance && <span className="var">{variance}</span>}
         </span>
       </div>
       <div className="c-status" />
@@ -200,7 +228,11 @@ export default function WeekDetail({ weekNo }) {
   const { plan, activities, weeks, summary } = data;
   const wk = weeks.find(w => w.week === weekNo);
   const rows = plan.filter(p => p.week === weekNo);
-  const acts = activities.filter(a => a.week === weekNo);
+  const planById = Object.fromEntries(plan.map(p => [p.plan_id, p]));
+  // In the order they were done (the activity list comes newest first).
+  const acts = activities
+    .filter(a => a.week === weekNo)
+    .sort((x, y) => x.activity_date.localeCompare(y.activity_date) || x.activity_id - y.activity_id);
 
   return (
     <div className="card">
@@ -244,8 +276,15 @@ export default function WeekDetail({ weekNo }) {
 
       {DAYS.map(day => {
         const dayRows = rows.filter(r => r.day === day);
-        const date = dayRows[0]?.date;
-        const extras = acts.filter(a => a.activity_date === date && !a.plan_id);
+        // From the week's start, not the day's sessions: an edited plan can leave a day empty.
+        const d = new Date(wk.start + "T00:00:00");
+        d.setDate(d.getDate() + DAYS.indexOf(day));
+        const date = d.toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
+        // This day's workouts that aren't listed under one of this day's sessions: unplanned ones,
+        // and ones counting toward a session planned for another day.
+        const extras = acts.filter(
+          a => a.activity_date === date && (!a.plan_id || planById[a.plan_id]?.date !== date),
+        );
         return (
           <section className={"day" + (date === summary.today ? " is-today" : "")} key={day}>
             <div className="day-label">
@@ -253,11 +292,26 @@ export default function WeekDetail({ weekNo }) {
               <span>{fmtDate(date, { month: "short", day: "numeric" })}</span>
             </div>
             <div className="sessions">
-              {dayRows.map(r => (
-                <SessionRow key={r.plan_id} r={r} linked={acts.filter(a => a.plan_id === r.plan_id)} />
-              ))}
+              {dayRows.map(r => {
+                // All of its workouts, from any day (or week); only same-day ones go underneath.
+                const linked = activities.filter(a => a.plan_id === r.plan_id);
+                const underneath = acts.filter(a => a.plan_id === r.plan_id && a.activity_date === r.date);
+                return (
+                  <Fragment key={r.plan_id}>
+                    <SessionRow r={r} linked={linked} underneath={underneath.length} />
+                    {underneath.map(a => (
+                      <WorkoutRow
+                        key={a.activity_id}
+                        a={a}
+                        indented
+                        variance={linked.length === 1 ? varianceText(r) : ""}
+                      />
+                    ))}
+                  </Fragment>
+                );
+              })}
               {extras.map(a => (
-                <ExtraRow key={a.activity_id} a={a} />
+                <WorkoutRow key={a.activity_id} a={a} countsToward={a.plan_id ? planById[a.plan_id] : null} />
               ))}
             </div>
           </section>

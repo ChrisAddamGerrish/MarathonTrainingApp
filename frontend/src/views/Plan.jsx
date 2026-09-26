@@ -1,6 +1,6 @@
 import { useData } from "../contexts/DataContext";
 import { fmtDate, focusWeek } from "../utils/format";
-import WeekDetail from "../components/WeekDetail";
+import PlanWeek from "../components/PlanWeek";
 
 const SHORT_TYPE = { Normal: "", "Step-back": "Step-back", Taper: "Taper", Peak: "Peak", Race: "Race" };
 
@@ -35,7 +35,7 @@ export default function Plan({ arg }) {
         </nav>
       </div>
       <div className="section">
-        <WeekDetail weekNo={selected} />
+        <PlanWeek weekNo={selected} />
       </div>
     </>
   );

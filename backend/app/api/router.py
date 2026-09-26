@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends
 
 from backend.app.api.deps import require_login
-from backend.app.api.routes import activities, auth, data, health, history, plan
+from backend.app.api.routes import activities, auth, data, health, history, plan, strava
 
 api_router = APIRouter(prefix="/api")
 
@@ -16,3 +16,4 @@ api_router.include_router(data.router, dependencies=signed_in)
 api_router.include_router(plan.router, dependencies=signed_in)
 api_router.include_router(activities.router, dependencies=signed_in)
 api_router.include_router(history.router, dependencies=signed_in)
+api_router.include_router(strava.router, dependencies=signed_in)

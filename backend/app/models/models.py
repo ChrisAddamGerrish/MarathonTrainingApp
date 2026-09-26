@@ -1,14 +1,19 @@
 """SQLAlchemy ORM models for marathon.db.
 
 training_plan, activity_log and the plan_vs_actual view already exist in the database and are
-only mapped here. activity_history and plan_skips are owned by this app: database.init_db()
-creates them (and adds any columns added to the models later).
+only mapped here (the Plan tab edits training_plan's rows, never its structure). activity_history, plan_skips and strava_imports are owned by this app:
+database.init_db() creates them (and adds any columns added to the models later).
 """
 from datetime import date
 from typing import Any, Optional
 
-from sqlalchemy import JSON, CheckConstraint, Date, ForeignKey, Index, Integer, String, text
+from sqlalchemy import JSON, BigInteger, CheckConstraint, Date, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# Categories a logged activity can have. training_plan has its own, shorter list (no Stretch):
+# both are enforced by CHECK constraints, and database.init_db widens activity_log's to this.
+PLAN_CATEGORIES = ("Strength", "Bike", "Run", "Race", "Row", "Rest")
+ACTIVITY_CATEGORIES = PLAN_CATEGORIES + ("Stretch",)
 
 # Columns of activity_log that are tracked in history and can be edited / reverted.
 ACTIVITY_COLUMNS = [
@@ -31,7 +36,7 @@ class TrainingPlan(Base):
 
     plan_id: Mapped[str] = mapped_column(String, primary_key=True)
     # SQLite's implicit rowid: the order the plan rows were entered in, which is the order
-    # sessions appear within a day. Read-only; this table is never created or written by the app.
+    # sessions appear within a day. Read-only: SQLite assigns it, so added sessions come last.
     entry_order: Mapped[int] = mapped_column("rowid", Integer)
     week: Mapped[int]
     day: Mapped[str]
@@ -114,3 +119,22 @@ class PlanSkip(Base):
     skipped_at: Mapped[str] = mapped_column(String, server_default=_UTC_NOW)
 
     plan: Mapped[TrainingPlan] = relationship(back_populates="skip")
+
+
+class StravaImport(Base):
+    """One Strava activity the sync has dealt with, so it is never imported twice.
+
+    No foreign key on purpose: the row outlives a deleted (or reverted) activity, so an import
+    you undid stays undone instead of coming back on the next sync.
+    """
+
+    __tablename__ = "strava_imports"
+    __table_args__ = (
+        CheckConstraint("outcome IN ('created', 'matched')", name="ck_strava_imports_outcome"),
+    )
+
+    strava_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    # 'created': the sync added activity_id. 'matched': you had already logged it as activity_id.
+    outcome: Mapped[str]
+    activity_id: Mapped[int]
+    imported_at: Mapped[str] = mapped_column(String, server_default=_UTC_NOW)

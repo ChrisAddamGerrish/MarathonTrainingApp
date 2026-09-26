@@ -2,6 +2,7 @@ import { useData } from "../contexts/DataContext";
 import { useDialogs } from "../contexts/DialogContext";
 import { CATEGORIES, fmtDate, fmtMi, fmtMin, isRun, pace } from "../utils/format";
 import { Chip, ClickableRow } from "../components/common";
+import StravaPanel from "../components/StravaPanel";
 
 const Dash = () => <span className="muted">—</span>;
 
@@ -35,6 +36,7 @@ export default function Log({ filters, setFilters }) {
           + Log activity
         </button>
       </div>
+      <StravaPanel />
       <div className="filters" style={{ marginBottom: 12 }}>
         <select aria-label="Category" value={filters.category} onChange={setFilter("category")}>
           <option value="">All categories</option>
