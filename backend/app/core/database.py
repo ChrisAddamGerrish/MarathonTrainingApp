@@ -18,7 +18,10 @@ from backend.app.core.config import DB_PATH
 from backend.app.models.models import (
     ACTIVITY_CATEGORIES,
     ActivityHistory,
+    ActivityMetrics,
+    AthleteZones,
     Base,
+    Gear,
     Owned,
     PlanSkip,
     PlanVsActual,
@@ -114,7 +117,8 @@ def get_session() -> Iterator[Session]:
 # Everything the models describe, except plan_vs_actual, which is a view (PLAN_VS_ACTUAL_VIEW).
 _TABLES: list[Table] = [t for t in Base.metadata.sorted_tables if t is not PlanVsActual.__table__]
 # Tables whose later-added columns _add_missing_columns fills in.
-_APP_TABLES: list[Table] = [ActivityHistory.__table__, PlanSkip.__table__, StravaImport.__table__]
+_APP_TABLES: list[Table] = [ActivityHistory.__table__, PlanSkip.__table__, StravaImport.__table__,
+                            ActivityMetrics.__table__, Gear.__table__, AthleteZones.__table__]
 
 PLAN_VS_ACTUAL_VIEW = """CREATE VIEW IF NOT EXISTS plan_vs_actual AS
 SELECT

@@ -233,3 +233,79 @@ class StravaImport(Owned, Base):
     outcome: Mapped[str]
     activity_id: Mapped[int]
     imported_at: Mapped[str] = mapped_column(String, server_default=_UTC_NOW)
+
+
+# --------------------------------------------------------------------------
+# From Strava (services/strava.py). Kept apart from activity_log: these aren't edited in the app,
+# so they stay out of its history and edit form, and a later sync can refresh them.
+# --------------------------------------------------------------------------
+
+
+class ActivityMetrics(Owned, Base):
+    """What Strava knows about a logged activity beyond the log's own columns.
+
+    The summary fields come with every sync; description and below come from Strava's detailed
+    activity (fetched a few per sync, see strava.enrich), and hr_zone_seconds from its heart-rate
+    stream. No foreign key to the activity, like strava_imports: the metrics wait for an activity
+    that is deleted and then brought back (revert, restore) under the same id.
+    """
+
+    __tablename__ = "activity_metrics"
+
+    activity_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.user_id"))
+    strava_id: Mapped[int] = mapped_column(BigInteger)
+    # Summary (every sync)
+    start_time: Mapped[Optional[str]]  # local HH:MM
+    elapsed_min: Mapped[Optional[float]]  # including stops; the log's duration is moving time
+    elevation_gain_ft: Mapped[Optional[float]]
+    avg_hr: Mapped[Optional[float]]
+    max_hr: Mapped[Optional[float]]
+    avg_cadence: Mapped[Optional[float]]  # steps per minute for runs, rpm for rides
+    avg_watts: Mapped[Optional[float]]
+    weighted_avg_watts: Mapped[Optional[float]]
+    max_watts: Mapped[Optional[float]]
+    avg_speed_mph: Mapped[Optional[float]]
+    max_speed_mph: Mapped[Optional[float]]
+    suffer_score: Mapped[Optional[float]]  # Strava's Relative Effort
+    pr_count: Mapped[Optional[int]]
+    trainer: Mapped[Optional[bool]]  # indoors: treadmill, trainer, Peloton
+    gear_id: Mapped[Optional[str]]
+    polyline: Mapped[Optional[str]]  # the route, Google encoded-polyline format
+    # Detailed activity (one extra request each)
+    description: Mapped[Optional[str]]
+    calories: Mapped[Optional[float]]
+    device_name: Mapped[Optional[str]]
+    splits: Mapped[Optional[list[Any]]] = mapped_column(JSON(none_as_null=True))  # per mile
+    laps: Mapped[Optional[list[Any]]] = mapped_column(JSON(none_as_null=True))
+    best_efforts: Mapped[Optional[list[Any]]] = mapped_column(JSON(none_as_null=True))
+    # Seconds in each heart-rate zone, from the heart-rate stream and the athlete's zones
+    hr_zone_seconds: Mapped[Optional[list[Any]]] = mapped_column(JSON(none_as_null=True))
+    details_fetched_at: Mapped[Optional[str]]  # UTC; NULL until the detailed activity was read
+
+
+class Gear(Owned, Base):
+    """A pair of shoes or a bike from the athlete's Strava profile, with its total distance there."""
+
+    __tablename__ = "gear"
+    __table_args__ = (CheckConstraint("kind IN ('shoe', 'bike')", name="ck_gear_kind"),)
+
+    gear_id: Mapped[str] = mapped_column(String, primary_key=True)  # Strava's id, e.g. 'g1234'
+    kind: Mapped[str]
+    name: Mapped[str]
+    distance_mi: Mapped[float]
+    is_primary: Mapped[bool] = mapped_column(default=False)
+    retired: Mapped[bool] = mapped_column(default=False)
+    # Shoes only: when to say it's time for a new pair. Set in the app; kept when Strava refreshes.
+    replace_at_mi: Mapped[Optional[float]]
+    updated_at: Mapped[str] = mapped_column(String, server_default=_UTC_NOW)
+
+
+class AthleteZones(Owned, Base):
+    """The athlete's heart-rate (and power) zones from Strava: [{min, max}, ...], max -1 = open."""
+
+    __tablename__ = "athlete_zones"
+
+    heart_rate: Mapped[Optional[list[Any]]] = mapped_column(JSON(none_as_null=True))
+    power: Mapped[Optional[list[Any]]] = mapped_column(JSON(none_as_null=True))
+    fetched_at: Mapped[str] = mapped_column(String, server_default=_UTC_NOW)

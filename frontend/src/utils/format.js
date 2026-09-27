@@ -52,3 +52,16 @@ export const activityStats = a =>
 
 /** Week shown on the dashboard: the current one, clamped into the plan. */
 export const focusWeek = summary => Math.min(Math.max(summary.current_week, 1), summary.last_week);
+
+/** 1:23:45 or 23:45 from seconds. */
+export const fmtSeconds = s => {
+  if (s == null) return "—";
+  s = Math.round(s);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+};
+
+/** "8:59 /mi" from seconds taken over miles. */
+export const paceOf = (seconds, miles) => (seconds && miles ? `${fmtSeconds(seconds / miles)} /mi` : "—");
