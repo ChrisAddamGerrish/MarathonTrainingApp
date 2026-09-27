@@ -6,10 +6,11 @@ import logging
 from datetime import date
 from typing import Any, Optional
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, insert, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from backend.app.core.database import backup_database
 from backend.app.core.errors import ConflictError, NotFoundError, UnprocessableError
 from backend.app.models.models import (
     ACTIVITY_COLUMNS,
@@ -460,3 +461,108 @@ def revert_history(session: Session, history_id: int) -> dict[str, Any]:
 
     restored = session.get(ActivityLog, activity_id)
     return {"history_id": new_entry_id, "activity": _plain_activity(restored) if restored else None}
+
+
+# --------------------------------------------------------------------------
+# Restoring backups
+# --------------------------------------------------------------------------
+
+# Plan columns a backup carries (plus plan_id); what the app works out itself isn't in it.
+_PLAN_BACKUP_COLUMNS = ["week", "day", "week_type", "category", "run_subtype", "planned_session",
+                        "target_distance_mi", "target_duration_min", "notes"]
+
+
+def restore_activities(session: Session, rows: list[dict[str, Any]], apply: bool) -> dict[str, Any]:
+    """Make the activity log match a backup (services/backup.parse_workouts).
+
+    Rows with an id update that activity (or bring it back with that id if it was deleted), rows
+    without one are added, and activities the backup doesn't have are deleted. Each of those is an
+    ordinary change, so the history records it and it can be reverted one by one. With apply=False
+    nothing is written: the counts say what would happen.
+    """
+    unknown = sorted({r["plan_id"] for r in rows if r["plan_id"]} - set(session.scalars(select(TrainingPlan.plan_id))))
+    if unknown:
+        raise UnprocessableError(f"The plan has no session {', '.join(unknown)}. Restore the plan backup first.")
+
+    current = {a.activity_id: a for a in session.scalars(select(ActivityLog))}
+    wanted = {r["activity_id"] for r in rows if r["activity_id"] is not None}
+    added, changed, unchanged = 0, 0, 0
+    for r in rows:
+        values = {c: r[c] for c in ACTIVITY_COLUMNS}
+        existing = current.get(r["activity_id"])
+        if existing is None:
+            added += 1
+            if apply:
+                session.add(ActivityLog(activity_id=r["activity_id"], **values))
+        elif any(getattr(existing, c) != v for c, v in values.items()):
+            changed += 1
+            if apply:
+                for c, v in values.items():
+                    setattr(existing, c, v)
+        else:
+            unchanged += 1
+    removed = [a for i, a in current.items() if i not in wanted]
+    result = {"added": added, "changed": changed, "removed": len(removed), "unchanged": unchanged}
+    if not apply:
+        return result
+
+    result["backup"] = backup_database("before-workout-restore")
+    for a in removed:
+        session.delete(a)
+    session.commit()
+    log.info("Workouts restored from a backup: %(added)s added, %(changed)s changed, %(removed)s removed "
+             "(database copied to %(backup)s)", result)
+    return result
+
+
+def restore_plan(session: Session, rows: list[dict[str, Any]], apply: bool) -> dict[str, Any]:
+    """Replace the training plan (sessions, week types, skips) with a backup's
+    (services/backup.parse_plan). Sessions keep the backup's order within each day.
+
+    Logged activities that count toward a session the backup doesn't have are unlinked, which the
+    history records. Plan edits have no history of their own, so the database is copied to
+    backups/ first. With apply=False nothing is written: the counts say what would happen.
+    """
+    current = {p.plan_id: p for p in session.scalars(select(TrainingPlan))}
+    skips = {s.plan_id: s.reason for s in session.scalars(select(PlanSkip))}
+    wanted = {r["plan_id"]: r for r in rows}
+    added = [i for i in wanted if i not in current]
+    removed = [i for i in current if i not in wanted]
+    changed = [i for i, r in wanted.items() if i in current and (
+        any(getattr(current[i], c) != r[c] for c in _PLAN_BACKUP_COLUMNS)
+        or (i in skips) != r["skipped"] or skips.get(i) != r["skip_reason"])]
+    orphans = list(session.scalars(select(ActivityLog).where(ActivityLog.plan_id.in_(removed))
+                                   .order_by(ActivityLog.activity_date)))
+    # A skipped session that has a logged activity isn't skipped; drop those skips.
+    linked = {a.plan_id for a in session.scalars(select(ActivityLog).where(ActivityLog.plan_id.is_not(None)))}
+    result = {"added": len(added), "changed": len(changed), "removed": len(removed),
+              "unchanged": len(rows) - len(added) - len(changed), "unlinked": len(orphans)}
+    if not apply:
+        return result
+
+    result["backup"] = backup_database("before-plan-restore")
+    try:
+        for a in orphans:
+            a.plan_id = None
+        session.flush()
+        # Delete and re-add every session so rowid (the order within a day) follows the file.
+        # Activities still point at the sessions being re-added, so check that at COMMIT only.
+        session.execute(delete(PlanSkip))  # a write, so the transaction the pragma applies to has begun
+        session.execute(text("PRAGMA defer_foreign_keys = ON"))
+        session.execute(delete(TrainingPlan))
+        session.execute(insert(TrainingPlan.__table__),
+                        [{"plan_id": r["plan_id"], **{c: r[c] for c in _PLAN_BACKUP_COLUMNS}} for r in rows])
+        skipped = [{"plan_id": r["plan_id"], "reason": r["skip_reason"]}
+                   for r in rows if r["skipped"] and r["plan_id"] not in linked]
+        if skipped:
+            session.execute(insert(PlanSkip.__table__), skipped)
+        session.commit()
+    except IntegrityError as e:
+        session.rollback()
+        raise ConflictError(f"Can't restore the plan: {e.orig}") from e
+    except Exception:
+        session.rollback()
+        raise
+    log.info("Plan restored from a backup: %(added)s added, %(changed)s changed, %(removed)s removed, "
+             "%(unlinked)s activities unlinked (database copied to %(backup)s)", result)
+    return result

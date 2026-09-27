@@ -44,7 +44,7 @@ function Shell({ user, onSignOut }) {
   } else if (tab === "plan") {
     content = <Plan arg={arg} />;
   } else if (tab === "log") {
-    content = <Log filters={filters} setFilters={setFilters} />;
+    content = <Log arg={arg} filters={filters} setFilters={setFilters} />;
   } else if (tab === "history") {
     content = <History />;
   } else {
