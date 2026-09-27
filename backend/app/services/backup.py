@@ -12,7 +12,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from backend.app.core.errors import UnprocessableError
-from backend.app.schemas.schemas import ActivityIn, PlanSessionIn, WeekType
+from backend.app.schemas import ActivityIn, PlanSessionIn, WeekType
 
 # CSV header -> field, for each kind of backup.
 WORKOUT_COLUMNS = {

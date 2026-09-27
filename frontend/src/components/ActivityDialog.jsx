@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, jsonRequest } from "../services/api";
 import { useData } from "../contexts/DataContext";
-import { DetailRows, DiffRows, diffActivity } from "../utils/diff";
+import { DetailRows, DiffRows } from "./ActivityDiff";
+import { diffActivity } from "../utils/diff";
 import { CATEGORIES } from "../utils/format";
 import { planLinkWarnings } from "../utils/planLink";
 import StravaDetails from "./StravaDetails";

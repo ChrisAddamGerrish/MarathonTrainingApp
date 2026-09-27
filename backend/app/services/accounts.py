@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from backend.app.core import auth
 from backend.app.core.database import SessionLocal
 from backend.app.core.errors import ConflictError, UnprocessableError
-from backend.app.models.models import Invite, PlanWeek, User
+from backend.app.models import Invite, PlanWeek, User
 
 log = logging.getLogger("marathon.auth")
 
@@ -87,7 +87,7 @@ def create_invite(created_by: Optional[int]) -> tuple[str, str]:
         if created_by is None:
             created_by = session.scalar(select(User.user_id).where(User.is_admin).order_by(User.user_id).limit(1))
             if created_by is None:
-                raise ConflictError("There's no admin account yet. Create one first (python -m backend.app.core.auth).")
+                raise ConflictError("There's no admin account yet. Create one first (python -m backend.cli).")
         session.add(Invite(code_hash=_code_hash(code), created_by=created_by, expires_at=expires))
         session.commit()
     log.info("Invite created by user %s, expires %s", created_by, expires)

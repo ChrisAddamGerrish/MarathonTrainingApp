@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body
 
 from backend.app.api.deps import SessionDep
-from backend.app.repository.repository import restore_activities, restore_plan
+from backend.app.repository import restore_activities, restore_plan
 from backend.app.services.backup import parse_plan, parse_workouts
 
 router = APIRouter(prefix="/restore", tags=["backup"])

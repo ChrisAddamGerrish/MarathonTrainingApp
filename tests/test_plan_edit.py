@@ -13,7 +13,7 @@ from sqlalchemy import delete, select
 from backend.app.core import config
 from backend.app.core.database import SessionLocal, engine, init_db
 from backend.app.main import app
-from backend.app.models.models import ActivityLog, PlanWeek, TrainingPlan
+from backend.app.models import ActivityLog, PlanWeek, TrainingPlan
 
 WEEK = 19  # far enough ahead that nothing is logged in it
 

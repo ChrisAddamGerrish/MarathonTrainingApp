@@ -19,9 +19,10 @@ from sqlalchemy import select
 
 from backend.app.api.routes import auth as auth_routes
 from backend.app.core import config
-from backend.app.core.database import SessionLocal, engine, init_db, migrate_to_multi_user
+from backend.app.core.database import SessionLocal, engine, init_db
+from backend.app.core.migrations import migrate_to_multi_user
 from backend.app.main import app
-from backend.app.models.models import Invite, User
+from backend.app.models import Invite, User
 from backend.app.services import accounts, strava
 
 START = "2026-10-05"  # a Monday
@@ -243,7 +244,7 @@ class IsolationTests(unittest.TestCase):
 
     def test_strava_details_are_theirs_only(self):
         from tests import owner_session
-        from backend.app.repository import repository as repo
+        from backend.app import repository as repo
 
         a = self.owner_data["activities"][0]
         with owner_session() as s:
@@ -259,7 +260,7 @@ class IsolationTests(unittest.TestCase):
         finally:
             with owner_session() as s:
                 from sqlalchemy import delete
-                from backend.app.models.models import ActivityMetrics, Gear
+                from backend.app.models import ActivityMetrics, Gear
                 s.execute(delete(ActivityMetrics))
                 s.execute(delete(Gear))
                 s.commit()

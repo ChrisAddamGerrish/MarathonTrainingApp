@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Query
 
 from backend.app.api.deps import SessionDep
-from backend.app.repository.repository import history_entries, revert_history
+from backend.app.repository import history_entries, revert_history
 
 router = APIRouter(prefix="/history", tags=["history"])
 

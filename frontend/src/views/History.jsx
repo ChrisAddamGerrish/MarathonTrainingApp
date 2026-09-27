@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../services/api";
 import { useData } from "../contexts/DataContext";
 import { useDialogs } from "../contexts/DialogContext";
-import { DetailRows, DiffRows } from "../utils/diff";
+import { DetailRows, DiffRows } from "../components/ActivityDiff";
 import { activityStats, fmtDate } from "../utils/format";
 import { revertInfo } from "../utils/revert";
 import { useToast } from "../contexts/ToastContext";

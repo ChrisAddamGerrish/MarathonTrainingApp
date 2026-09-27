@@ -3,8 +3,8 @@
 # The app has its own sign-in page (see backend/app/core/auth.py), so Caddy only terminates HTTPS
 # and forwards. The app itself stays bound to 127.0.0.1; only Caddy listens on the network.
 #
-# Settings come from caddy.env (created on the first run of start.ps1, or copy
-# caddy.env.example). start.ps1 sets MARATHON_APP_PORT from its -Port parameter.
+# Settings come from deploy/caddy.env (created on the first run of start.ps1, or copy
+# deploy/caddy.env.example). start.ps1 sets MARATHON_APP_PORT from its -Port parameter.
 #
 #   MARATHON_SITE           Where Caddy listens. A domain name (marathon.example.com) gets a free
 #                           HTTPS certificate automatically; ports 80 and 443 must reach this PC.
@@ -14,9 +14,10 @@
 #                           CA, for home-network names like marathon.home (devices must trust
 #                           Caddy's root certificate). Ignored when MARATHON_SITE is a bare port.
 #
-# Run by hand:  caddy run --config Caddyfile --envfile caddy.env
+# Run by hand, from the project folder (the log path below is relative to it):
+#   caddy run --config deploy/Caddyfile --envfile deploy/caddy.env
 {
-	# Keep the console quiet; requests are written to logs/caddy-access.log.
+	# Keep the console quiet; requests are written to data/logs/caddy-access.log.
 	log {
 		level WARN
 	}
@@ -45,7 +46,7 @@
 	reverse_proxy 127.0.0.1:{$MARATHON_APP_PORT:8000}
 
 	log {
-		output file logs/caddy-access.log {
+		output file data/logs/caddy-access.log {
 			roll_size 10MiB
 			roll_keep 5
 		}

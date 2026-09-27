@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.api.deps import SessionDep, UserDep, signed_in_user
 from backend.app.core.database import user_session
-from backend.app.repository import repository as repo
+from backend.app import repository as repo
 from backend.app.core.errors import AppError
 from backend.app.services import strava
 

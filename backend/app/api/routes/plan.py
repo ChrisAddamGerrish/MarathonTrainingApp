@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter
 
 from backend.app.api.deps import SessionDep
-from backend.app.repository.repository import (
+from backend.app.repository import (
     create_plan_session,
     delete_plan_session,
     set_week_type,
@@ -12,7 +12,7 @@ from backend.app.repository.repository import (
     unskip_session,
     update_plan_session,
 )
-from backend.app.schemas.schemas import PlanSessionIn, SkipIn, WeekIn
+from backend.app.schemas import PlanSessionIn, SkipIn, WeekIn
 
 router = APIRouter(prefix="/plan", tags=["plan"])
 

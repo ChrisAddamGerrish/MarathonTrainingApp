@@ -5,7 +5,7 @@ from fastapi import APIRouter
 
 from backend.app.api.deps import SessionDep
 from backend.app.core.database import tenant_of
-from backend.app.repository.repository import gear_rows, hr_zones, personal_bests, training_overview
+from backend.app.repository import gear_rows, hr_zones, personal_bests, training_overview
 from backend.app.services import planning
 
 router = APIRouter(tags=["data"])

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from backend.app.core import auth
 from backend.app.core.database import SessionLocal, Tenant, user_session
 from backend.app.core.errors import ForbiddenError, UnauthorizedError
-from backend.app.models.models import User
+from backend.app.models import User
 from backend.app.services import strava
 
 
