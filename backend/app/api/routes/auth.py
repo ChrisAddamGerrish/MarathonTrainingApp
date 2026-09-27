@@ -91,7 +91,9 @@ def login(body: LoginIn, request: Request, response: Response):
     _check_not_locked_out(client, "sign-in")
     with SessionLocal() as session:
         if not accounts.any_can_sign_in(session):
-            raise NotConfiguredError("Sign-in isn't set up yet. On the server, run start.ps1 -ResetLogin.")
+            raise NotConfiguredError("Sign-in isn't set up yet. On the server, create the first account: run "
+                                     "start.ps1 -ResetLogin, or with Docker "
+                                     "docker compose exec app python -m backend.cli.")
         user = accounts.find_user(session, body.username)
         if not auth.check_password(body.password, user.password_hash if user else None):
             _failed(client)
