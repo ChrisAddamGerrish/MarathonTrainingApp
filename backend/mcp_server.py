@@ -137,11 +137,9 @@ def _activity_values(**fields: Any) -> dict[str, Any]:
 def get_summary() -> dict[str, Any]:
     """Race countdown, current training week, miles run, plan adherence and skipped sessions."""
     with db() as s:
-        today, start = date.today(), tenant_of(s).plan_start
-        plan = planning.build_plan(repo.plan_rows(s), today, start)
-        acts = repo.activity_rows(s)
-        weeks = planning.build_weeks(repo.plan_week_rows(s), plan, acts, start)
-        return planning.build_summary(plan, acts, weeks, today, start)
+        today = date.today()
+        plan, acts, weeks = repo.training_overview(s, today)
+        return planning.build_summary(plan, acts, weeks, today, tenant_of(s).plan_start)
 
 
 @tool(READ)
@@ -150,10 +148,9 @@ def get_week(week: Optional[int] = None) -> dict[str, Any]:
     plan_id, status (done / missed / upcoming / skipped ...) and what was logged, plus activities
     logged that week without a plan link. Use the plan_ids here when logging activities."""
     with db() as s:
-        today, start = date.today(), tenant_of(s).plan_start
-        plan = planning.build_plan(repo.plan_rows(s), today, start)
-        acts = repo.activity_rows(s)
-        weeks = planning.build_weeks(repo.plan_week_rows(s), plan, acts, start)
+        today = date.today()
+        plan, acts, weeks = repo.training_overview(s, today)
+        start = tenant_of(s).plan_start
         last = weeks[-1]["week"]
         number = week if week is not None else min(max(planning.week_of(today, start), 1), last)
         totals = next((w for w in weeks if w["week"] == number), None)

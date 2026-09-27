@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 .venv/
 
+# IDE settings (PyCharm)
+.idea/
+
 # Project exclude paths
 /logs/
 /frontend/dist/

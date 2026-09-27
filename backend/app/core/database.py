@@ -5,7 +5,6 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Iterator
 
 from sqlalchemy import Connection, Table, create_engine, event, inspect
 from sqlalchemy.dialects import sqlite
@@ -102,12 +101,6 @@ def _stamp_owner(session: Session, _context, _instances) -> None:
                 obj.user_id = tenant.user_id
             elif obj.user_id != tenant.user_id:
                 raise RuntimeError(f"A session for user {tenant.user_id} tried to add a row for user {obj.user_id}")
-
-
-def get_session() -> Iterator[Session]:
-    """FastAPI dependency for routes that aren't about one user's data (sign-in)."""
-    with SessionLocal() as session:
-        yield session
 
 
 # --------------------------------------------------------------------------
