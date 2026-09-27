@@ -1,0 +1,4 @@
+# Docker files keep LF endings on every checkout (the image build runs them on Linux).
+Dockerfile text eol=lf
+compose.yaml text eol=lf
+.dockerignore text eol=lf

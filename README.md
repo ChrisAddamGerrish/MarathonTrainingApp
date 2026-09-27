@@ -63,6 +63,52 @@ Strava allows one connected athlete per API application (its owner) until they a
 `python -m backend.mcp_server` from the project root; it speaks MCP over stdio. It works on the
 data of the user named in `MARATHON_MCP_USER`, or the first admin if that isn't set.
 
+## Docker
+
+`Dockerfile` builds one image (frontend included) that runs as a non-root user. `compose.yaml`
+runs it with two named volumes: `data` (the database, backups, logs and Strava tokens) and
+`secrets` (`auth.env`, the cookie-signing key). No data or secrets go into the image.
+
+```powershell
+docker compose up -d --build                    # the app, on http://localhost:8000 (this PC only)
+docker compose exec app python -m backend.cli   # create the first admin account
+```
+
+**Settings** (all optional and git-ignored):
+
+- `.env` (copy `.env.example`): `TZ`, which makes the plan's "today" your today (the default is
+  UTC); `MARATHON_PORT`; `MARATHON_LOG_LEVEL`.
+- `strava.env` is passed to the container as environment variables, so the same file works for
+  Docker and `start.ps1`. Restart the container after changing it: `docker compose up -d`.
+
+**Reaching it from other devices:** add the Caddy proxy. It uses `deploy/Caddyfile` and
+`deploy/caddy.env`, the same as `start.ps1`, and publishes ports 80, 443 and 8080.
+
+```powershell
+docker compose --profile proxy up -d --build
+```
+
+The app itself is only published on `127.0.0.1`. Keep it that way while Caddy is in front: the app
+trusts the proxy's `X-Forwarded-*` headers (for secure cookies and the Strava callback URL).
+
+**MCP server:** point your MCP client at
+`docker compose exec -T app python -m backend.mcp_server`, run from this folder.
+
+**Moving existing data in** (from a `start.ps1` install). Stop the app first, then:
+
+```powershell
+docker compose create app
+docker compose cp data\. app:/app/data/
+docker compose cp auth.env app:/app/secrets/auth.env
+docker compose run --rm --no-deps --user root --entrypoint sh app -c "chown -R marathon:marathon /app/data /app/secrets"
+docker compose up -d
+```
+
+Copying `auth.env` keeps everyone signed in. Without it, people just sign in again.
+
+**Backups:** the data lives in the `marathon_data` volume. The app's **Export CSV** buttons, or
+`docker compose cp app:/app/data/marathon.db .`, get a copy out.
+
 ## Project layout
 
 ```
@@ -79,6 +125,7 @@ backend/
   mcp_server.py   MCP server
 frontend/src/     React app: views/, components/, contexts/, hooks/, services/, utils/
 deploy/           Caddyfile and caddy.env.example
+Dockerfile, compose.yaml, .env.example   Docker setup (see "Docker")
 tests/            unittest suite (runs against a temporary copy of tests/fixtures/single-user.db)
 data/             created at runtime, git-ignored: marathon.db, backups/, strava_tokens.json, logs/
 ```

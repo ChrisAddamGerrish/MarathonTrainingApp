@@ -4,6 +4,7 @@ Strava itself is never called: strava._request is replaced with a fake.
 
 Run from the project root:   .venv\\Scripts\\python.exe -m unittest tests.test_strava -v
 """
+import os
 import time
 import unittest
 from datetime import date
@@ -566,6 +567,25 @@ class MetricsTests(WeekTwoCleanup):
         state = strava._load_state(OWNER_ID)
         self.assertEqual((state["sync_start"], state["newest_start"]), ("2026-09-14", 123))
         self.assertTrue(strava.status(OWNER_ID)["profile_access"])
+
+
+
+class SettingsTests(unittest.TestCase):
+    def tearDown(self):
+        config.STRAVA_CONFIG_FILE.unlink(missing_ok=True)
+
+    def test_none_without_a_file_or_environment(self):
+        with mock.patch.dict(os.environ, {"STRAVA_CLIENT_ID": "", "STRAVA_CLIENT_SECRET": ""}):
+            self.assertIsNone(strava.client_settings())
+
+    def test_from_the_file(self):
+        write_settings()
+        self.assertEqual(strava.client_settings(), ("12345", "shh"))
+
+    def test_environment_wins_over_the_file(self):
+        write_settings()
+        with mock.patch.dict(os.environ, {"STRAVA_CLIENT_ID": "999", "STRAVA_CLIENT_SECRET": "env-secret"}):
+            self.assertEqual(strava.client_settings(), ("999", "env-secret"))
 
 
 if __name__ == "__main__":

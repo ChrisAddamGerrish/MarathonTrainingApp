@@ -1,0 +1,28 @@
+# Only the source the image needs. Above all, never the data or secrets (see Dockerfile).
+.git
+.gitignore
+.idea
+.claude
+.mcp.json
+.venv
+**/__pycache__
+**/*.py[cod]
+**/node_modules
+frontend/dist
+
+# Data and secrets
+data
+marathon.db
+strava_tokens.json
+backups
+logs
+*.env
+
+# Not needed to run the app
+tests
+start.bat
+start.ps1
+deploy
+README.md
+Dockerfile
+compose.yaml

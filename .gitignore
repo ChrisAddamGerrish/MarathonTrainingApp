@@ -19,6 +19,8 @@ __pycache__/
 /frontend/node_modules/vite/README.md
 # Caddy reverse proxy settings (see deploy/caddy.env.example)
 /deploy/caddy.env
+# Docker Compose settings (see .env.example)
+/.env
 # Web app login (see backend/app/core/auth.py)
 /auth.env
 # Strava API app settings (see backend/app/services/strava.py)

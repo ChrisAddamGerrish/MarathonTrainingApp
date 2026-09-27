@@ -1,10 +1,11 @@
 # Caddy reverse proxy that exposes the Marathon app beyond localhost.
 #
 # The app has its own sign-in page (see backend/app/core/auth.py), so Caddy only terminates HTTPS
-# and forwards. The app itself stays bound to 127.0.0.1; only Caddy listens on the network.
+# and forwards. The app itself isn't exposed to the network; only Caddy listens there.
 #
 # Settings come from deploy/caddy.env (created on the first run of start.ps1, or copy
-# deploy/caddy.env.example). start.ps1 sets MARATHON_APP_PORT from its -Port parameter.
+# deploy/caddy.env.example). start.ps1 sets MARATHON_APP_PORT from its -Port parameter; compose.yaml
+# sets MARATHON_APP_HOST to the app's container (the default, 127.0.0.1, is for start.ps1).
 #
 #   MARATHON_SITE           Where Caddy listens. A domain name (marathon.example.com) gets a free
 #                           HTTPS certificate automatically; ports 80 and 443 must reach this PC.
@@ -43,7 +44,7 @@
 		-Server
 	}
 
-	reverse_proxy 127.0.0.1:{$MARATHON_APP_PORT:8000}
+	reverse_proxy {$MARATHON_APP_HOST:127.0.0.1}:{$MARATHON_APP_PORT:8000}
 
 	log {
 		output file data/logs/caddy-access.log {
