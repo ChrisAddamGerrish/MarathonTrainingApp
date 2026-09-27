@@ -311,6 +311,10 @@ dialog form[hidden] { display: none; }
 .login-card .field input { padding: 10px 12px; font-size: 16px; } /* 16px stops iOS zooming in on focus */
 .login-card .remember { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-2); cursor: pointer; }
 .login-card .remember input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.login-card .step { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px; }
+.login-card .small-note { font-size: 13px; min-height: 1em; }
+.login-card .btn.disabled { opacity: .6; pointer-events: none; }
+.account { display: flex; gap: 6px; align-items: center; }
 
 .banner { margin: 16px 0; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--bad); color: var(--bad); font-weight: 600; }
 .loading { padding: 80px 0; text-align: center; color: var(--muted); }
@@ -331,7 +335,7 @@ dialog form[hidden] { display: none; }
   .wk-summary { grid-template-columns: 1fr; gap: 14px; }
 }
 @media (max-width: 600px) {
-  .signout { order: 1; margin-left: auto; }
+  .account { order: 1; margin-left: auto; }
   nav.tabs { order: 2; margin-left: 0; width: 100%; }
   nav.tabs a { flex: 1; text-align: center; padding: 7px 4px; font-size: 13px; white-space: nowrap; }
   .diff-row { grid-template-columns: 1fr; gap: 2px; }

@@ -1,6 +1,10 @@
 """All database access, written against the ORM models. Functions take a Session and return
 plain dicts / raise domain errors, so callers never touch SQL or SQLAlchemy objects.
 
+Sessions belong to one user (database.user_session): every query here only sees that user's rows
+and new rows are theirs, without filtering by hand. Plan ids are unique per user, so plan rows are
+looked up by query (_find_plan), never Session.get.
+
 Every change to the data is logged here, once, whichever entry point (REST or MCP) made it."""
 import logging
 from datetime import date
@@ -10,7 +14,7 @@ from sqlalchemy import delete, desc, func, insert, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.core.database import backup_database
+from backend.app.core.database import backup_database, tenant_of
 from backend.app.core.errors import ConflictError, NotFoundError, UnprocessableError
 from backend.app.models.models import (
     ACTIVITY_COLUMNS,
@@ -18,6 +22,7 @@ from backend.app.models.models import (
     ActivityLog,
     PlanSkip,
     PlanVsActual,
+    PlanWeek,
     StravaImport,
     TrainingPlan,
 )
@@ -44,8 +49,8 @@ def _plain_activity(a: ActivityLog) -> dict[str, Any]:
     }
 
 
-def _activity(a: ActivityLog) -> dict[str, Any]:
-    return {**_plain_activity(a), "week": week_of(a.activity_date)}
+def _activity(session: Session, a: ActivityLog) -> dict[str, Any]:
+    return {**_plain_activity(a), "week": week_of(a.activity_date, tenant_of(session).plan_start)}
 
 
 def _snapshot(a: ActivityLog) -> dict[str, Any]:
@@ -68,9 +73,11 @@ def plan_rows(session: Session) -> list[dict[str, Any]]:
     """Planned sessions with what was actually done against them (from the plan_vs_actual
     view) and any skip. Ordered by week, then the order the rows were entered in."""
     stmt = (
-        select(TrainingPlan, PlanVsActual, PlanSkip)
-        .join(PlanVsActual, PlanVsActual.plan_id == TrainingPlan.plan_id)
-        .outerjoin(PlanSkip, PlanSkip.plan_id == TrainingPlan.plan_id)
+        select(TrainingPlan, PlanWeek.week_type, PlanVsActual, PlanSkip)
+        .join(PlanWeek, (PlanWeek.user_id == TrainingPlan.user_id) & (PlanWeek.week == TrainingPlan.week))
+        .join(PlanVsActual, (PlanVsActual.user_id == TrainingPlan.user_id)
+              & (PlanVsActual.plan_id == TrainingPlan.plan_id))
+        .outerjoin(PlanSkip, (PlanSkip.user_id == TrainingPlan.user_id) & (PlanSkip.plan_id == TrainingPlan.plan_id))
         .order_by(TrainingPlan.week, TrainingPlan.entry_order)
     )
     return [
@@ -78,7 +85,7 @@ def plan_rows(session: Session) -> list[dict[str, Any]]:
             "plan_id": p.plan_id,
             "week": p.week,
             "day": p.day,
-            "week_type": p.week_type,
+            "week_type": week_type,
             "category": p.category,
             "run_subtype": p.run_subtype,
             "planned_session": p.planned_session,
@@ -93,15 +100,23 @@ def plan_rows(session: Session) -> list[dict[str, Any]]:
             "skipped": s is not None,
             "skip_reason": s.reason if s else None,
         }
-        for p, v, s in session.execute(stmt)
+        for p, week_type, v, s in session.execute(stmt)
     ]
+
+
+def plan_week_rows(session: Session) -> list[dict[str, Any]]:
+    """The weeks of the plan, with their type, including weeks that have no sessions yet."""
+    return [{"week": w.week, "week_type": w.week_type}
+            for w in session.scalars(select(PlanWeek).order_by(PlanWeek.week))]
+
+
+def _find_plan(session: Session, plan_id: str) -> Optional[TrainingPlan]:
+    return session.scalars(select(TrainingPlan).where(TrainingPlan.plan_id == plan_id)).first()
 
 
 def skip_session(session: Session, plan_id: str, reason: Optional[str]) -> dict[str, Any]:
     """Mark a planned session as deliberately skipped (optionally with a reason)."""
-    plan = session.get(TrainingPlan, plan_id)
-    if plan is None:
-        raise NotFoundError(f"Unknown plan session '{plan_id}'")
+    plan = _get_plan(session, plan_id)
     if plan.category == "Rest":
         raise UnprocessableError("Rest days can't be skipped")
     if plan.activities:
@@ -123,17 +138,17 @@ def _plan_row(session: Session, plan_id: str) -> dict[str, Any]:
 
 
 def _get_plan(session: Session, plan_id: str) -> TrainingPlan:
-    plan = session.get(TrainingPlan, plan_id)
+    plan = _find_plan(session, plan_id)
     if plan is None:
         raise NotFoundError(f"Unknown plan session '{plan_id}'")
     return plan
 
 
-def _week_type(session: Session, week: int) -> str:
-    week_type = session.scalar(select(TrainingPlan.week_type).where(TrainingPlan.week == week).limit(1))
-    if week_type is None:
+def _get_week(session: Session, week: int) -> PlanWeek:
+    plan_week = session.scalars(select(PlanWeek).where(PlanWeek.week == week)).first()
+    if plan_week is None:
         raise NotFoundError(f"The plan has no week {week}")
-    return week_type
+    return plan_week
 
 
 def _new_plan_id(session: Session, week: int, day: str) -> str:
@@ -141,7 +156,7 @@ def _new_plan_id(session: Session, week: int, day: str) -> str:
     session moves to another day: activities and skips refer to them."""
     base, n = f"W{week}-{day}", 1
     plan_id = base
-    while session.get(TrainingPlan, plan_id) is not None:
+    while _find_plan(session, plan_id) is not None:
         n += 1
         plan_id = f"{base}-{n}"
     return plan_id
@@ -154,8 +169,8 @@ def _drop_skip_if_rest(session: Session, plan: TrainingPlan) -> None:
 
 
 def create_plan_session(session: Session, week: int, values: dict[str, Any]) -> dict[str, Any]:
-    plan = TrainingPlan(plan_id=_new_plan_id(session, week, values["day"]), week=week,
-                        week_type=_week_type(session, week), **values)
+    _get_week(session, week)  # 404 for a week the plan doesn't have
+    plan = TrainingPlan(plan_id=_new_plan_id(session, week, values["day"]), week=week, **values)
     session.add(plan)
     session.commit()
     log.info("Plan session %s added: %s on W%s %s", plan.plan_id, plan.planned_session, week, plan.day)
@@ -190,16 +205,14 @@ def delete_plan_session(session: Session, plan_id: str) -> dict[str, Any]:
 
 
 def set_week_type(session: Session, week: int, week_type: str) -> dict[str, Any]:
-    _week_type(session, week)  # 404 for a week the plan doesn't have
-    for plan in session.scalars(select(TrainingPlan).where(TrainingPlan.week == week)):
-        plan.week_type = week_type
+    _get_week(session, week).week_type = week_type
     session.commit()
     log.info("Plan week %s set to %s", week, week_type)
     return {"week": week, "week_type": week_type}
 
 
 def unskip_session(session: Session, plan_id: str) -> dict[str, Any]:
-    skip = session.get(PlanSkip, plan_id)
+    skip = session.scalars(select(PlanSkip).where(PlanSkip.plan_id == plan_id)).first()
     if skip is None:
         raise NotFoundError("That session isn't skipped")
     session.delete(skip)
@@ -215,7 +228,7 @@ def unskip_session(session: Session, plan_id: str) -> dict[str, Any]:
 
 def activity_rows(session: Session) -> list[dict[str, Any]]:
     stmt = select(ActivityLog).order_by(desc(ActivityLog.activity_date), desc(ActivityLog.activity_id))
-    return [_activity(a) for a in session.scalars(stmt)]
+    return [_activity(session, a) for a in session.scalars(stmt)]
 
 
 def _get_activity(session: Session, activity_id: int) -> ActivityLog:
@@ -226,11 +239,11 @@ def _get_activity(session: Session, activity_id: int) -> ActivityLog:
 
 
 def get_activity(session: Session, activity_id: int) -> dict[str, Any]:
-    return _activity(_get_activity(session, activity_id))
+    return _activity(session, _get_activity(session, activity_id))
 
 
 def _check_plan_id(session: Session, plan_id: Optional[str]) -> None:
-    if plan_id and session.get(TrainingPlan, plan_id) is None:
+    if plan_id and _find_plan(session, plan_id) is None:
         raise UnprocessableError(f"Unknown plan session '{plan_id}'")
 
 
@@ -241,7 +254,7 @@ def create_activity(session: Session, values: dict[str, Any]) -> dict[str, Any]:
     session.commit()
     log.info("Activity %s created: %s on %s (plan %s)", activity.activity_id, activity.category,
              activity.activity_date, activity.plan_id or "none")
-    return _activity(activity)
+    return _activity(session, activity)
 
 
 def update_activity(session: Session, activity_id: int, values: dict[str, Any]) -> dict[str, Any]:
@@ -254,7 +267,7 @@ def update_activity(session: Session, activity_id: int, values: dict[str, Any]) 
             setattr(activity, column, value)
     session.commit()
     log.info("Activity %s updated: %s", activity_id, ", ".join(changed) or "nothing changed")
-    return _activity(activity)
+    return _activity(session, activity)
 
 
 def delete_activity(session: Session, activity_id: int) -> dict[str, Any]:
@@ -287,7 +300,8 @@ def _plan_session_for(session: Session, day: date, category: str, duration_min: 
     """
     stmt = (
         select(TrainingPlan)
-        .where(TrainingPlan.week == week_of(day), TrainingPlan.category.in_(_same_kind(category)))
+        .where(TrainingPlan.week == week_of(day, tenant_of(session).plan_start),
+               TrainingPlan.category.in_(_same_kind(category)))
         .order_by(TrainingPlan.entry_order)
     )
     open_sessions = [p for p in session.scalars(stmt) if not p.activities and p.skip is None]
@@ -468,8 +482,20 @@ def revert_history(session: Session, history_id: int) -> dict[str, Any]:
 # --------------------------------------------------------------------------
 
 # Plan columns a backup carries (plus plan_id); what the app works out itself isn't in it.
-_PLAN_BACKUP_COLUMNS = ["week", "day", "week_type", "category", "run_subtype", "planned_session",
+_PLAN_BACKUP_COLUMNS = ["week", "day", "category", "run_subtype", "planned_session",
                         "target_distance_mi", "target_duration_min", "notes"]
+
+
+def _activity_id_taken(session: Session, activity_id: int) -> bool:
+    """Whether another user has (or had) an activity with this id. Ids are unique across users,
+    so a backup can only bring an id back if it was never someone else's."""
+    everyone = {"all_users": True}
+    return (session.scalar(select(ActivityLog.activity_id).where(ActivityLog.activity_id == activity_id)
+                           .execution_options(**everyone)) is not None
+            or session.scalar(select(ActivityHistory.history_id)
+                              .where(ActivityHistory.activity_id == activity_id,
+                                     ActivityHistory.user_id != tenant_of(session).user_id)
+                              .limit(1).execution_options(**everyone)) is not None)
 
 
 def restore_activities(session: Session, rows: list[dict[str, Any]], apply: bool) -> dict[str, Any]:
@@ -493,7 +519,8 @@ def restore_activities(session: Session, rows: list[dict[str, Any]], apply: bool
         if existing is None:
             added += 1
             if apply:
-                session.add(ActivityLog(activity_id=r["activity_id"], **values))
+                keep_id = r["activity_id"] is not None and not _activity_id_taken(session, r["activity_id"])
+                session.add(ActivityLog(activity_id=r["activity_id"] if keep_id else None, **values))
         elif any(getattr(existing, c) != v for c, v in values.items()):
             changed += 1
             if apply:
@@ -517,7 +544,8 @@ def restore_activities(session: Session, rows: list[dict[str, Any]], apply: bool
 
 def restore_plan(session: Session, rows: list[dict[str, Any]], apply: bool) -> dict[str, Any]:
     """Replace the training plan (sessions, week types, skips) with a backup's
-    (services/backup.parse_plan). Sessions keep the backup's order within each day.
+    (services/backup.parse_plan). Sessions keep the backup's order within each day. The plan gets
+    as many weeks as the backup's last one; weeks it has no sessions for are Normal weeks.
 
     Logged activities that count toward a session the backup doesn't have are unlinked, which the
     history records. Plan edits have no history of their own, so the database is copied to
@@ -525,12 +553,17 @@ def restore_plan(session: Session, rows: list[dict[str, Any]], apply: bool) -> d
     """
     current = {p.plan_id: p for p in session.scalars(select(TrainingPlan))}
     skips = {s.plan_id: s.reason for s in session.scalars(select(PlanSkip))}
+    week_types = {w.week: w.week_type for w in session.scalars(select(PlanWeek))}
     wanted = {r["plan_id"]: r for r in rows}
     added = [i for i in wanted if i not in current]
     removed = [i for i in current if i not in wanted]
     changed = [i for i, r in wanted.items() if i in current and (
         any(getattr(current[i], c) != r[c] for c in _PLAN_BACKUP_COLUMNS)
+        or week_types.get(r["week"]) != r["week_type"]
         or (i in skips) != r["skipped"] or skips.get(i) != r["skip_reason"])]
+    new_types = {r["week"]: r["week_type"] for r in rows}
+    weeks = [{"user_id": tenant_of(session).user_id, "week": n, "week_type": new_types.get(n, "Normal")}
+             for n in range(1, max(new_types) + 1)]
     orphans = list(session.scalars(select(ActivityLog).where(ActivityLog.plan_id.in_(removed))
                                    .order_by(ActivityLog.activity_date)))
     # A skipped session that has a logged activity isn't skipped; drop those skips.
@@ -550,9 +583,14 @@ def restore_plan(session: Session, rows: list[dict[str, Any]], apply: bool) -> d
         session.execute(delete(PlanSkip))  # a write, so the transaction the pragma applies to has begun
         session.execute(text("PRAGMA defer_foreign_keys = ON"))
         session.execute(delete(TrainingPlan))
+        session.execute(delete(PlanWeek))
+        # Core inserts: nothing stamps the user on these, so it's spelled out.
+        user_id = tenant_of(session).user_id
+        session.execute(insert(PlanWeek.__table__), weeks)
         session.execute(insert(TrainingPlan.__table__),
-                        [{"plan_id": r["plan_id"], **{c: r[c] for c in _PLAN_BACKUP_COLUMNS}} for r in rows])
-        skipped = [{"plan_id": r["plan_id"], "reason": r["skip_reason"]}
+                        [{"user_id": user_id, "plan_id": r["plan_id"], **{c: r[c] for c in _PLAN_BACKUP_COLUMNS}}
+                         for r in rows])
+        skipped = [{"user_id": user_id, "plan_id": r["plan_id"], "reason": r["skip_reason"]}
                    for r in rows if r["skipped"] and r["plan_id"] not in linked]
         if skipped:
             session.execute(insert(PlanSkip.__table__), skipped)

@@ -7,20 +7,29 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests import AUTH_FILE, TEST_DB, TEST_PASSWORD, TEST_USER, signed_in_client
+from tests import AUTH_FILE, OWNER_ID, OWNER_PLAN_START, TEST_DB, TEST_PASSWORD, TEST_USER, signed_in_client
 
 from fastapi.testclient import TestClient
 
 from backend.app.api.routes import auth as auth_routes
 from backend.app.core import auth
+from backend.app.core.database import SessionLocal, init_db
 from backend.app.main import app
+from backend.app.models.models import User
+from backend.app.services import accounts
 
 
 def setUpModule():
     if Path(auth.config.AUTH_FILE) != AUTH_FILE or Path(auth.config.DB_PATH) != TEST_DB:
         raise RuntimeError(f"Tests must use the temp login and database, but the app is using "
                            f"{auth.config.AUTH_FILE} and {auth.config.DB_PATH}")
-    auth.write_credentials(TEST_USER, TEST_PASSWORD)
+    init_db()
+
+
+def user_of(token):
+    """The user id a session cookie is good for right now (None if it isn't)."""
+    with SessionLocal() as s:
+        return auth.read_session(token, lambda uid: (u := s.get(User, uid)) and u.password_hash)
 
 
 def login(client, username=TEST_USER, password=TEST_PASSWORD, remember=False):
@@ -88,10 +97,12 @@ class RouteProtectionTests(unittest.TestCase):
         client = signed_in_client()
         token = client.cookies[auth.COOKIE]
         payload, signature = token.rsplit(".", 1)
-        forged = auth._b64(b'{"u": "tester", "exp": 9999999999}')
-        self.assertIsNone(auth.session_user(f"{forged}.{signature}"))
+        forged = auth._b64(b'{"uid": 1, "exp": 9999999999}')
+        self.assertIsNone(user_of(f"{forged}.{signature}"))
+        self.assertIsNone(user_of(f"{payload}.{signature[:-2]}AA"))
+        self.assertIsNone(user_of("not-a-token"))
         with mock.patch.object(time, "time", return_value=time.time() + auth.SESSION_SECONDS + 1):
-            self.assertIsNone(auth.session_user(token))
+            self.assertIsNone(user_of(token))
 
     def test_remember_me_keeps_the_session_for_90_days(self):
         client = TestClient(app)
@@ -99,9 +110,9 @@ class RouteProtectionTests(unittest.TestCase):
         self.assertIn(f"max-age={90 * 24 * 3600}", cookie)
         token = client.cookies[auth.COOKIE]
         with mock.patch.object(time, "time", return_value=time.time() + 89 * 24 * 3600):
-            self.assertEqual(auth.session_user(token), TEST_USER)
+            self.assertEqual(user_of(token), OWNER_ID)
         with mock.patch.object(time, "time", return_value=time.time() + 91 * 24 * 3600):
-            self.assertIsNone(auth.session_user(token))
+            self.assertIsNone(user_of(token))
 
     def test_without_remember_me_the_cookie_ends_with_the_browser(self):
         client = TestClient(app)
@@ -113,15 +124,17 @@ class RouteProtectionTests(unittest.TestCase):
         client = signed_in_client()
         self.assertEqual(client.get("/api/data").status_code, 200)
         try:
-            time.sleep(0.02)  # the login file is re-read when its modification time changes
-            auth.write_credentials(TEST_USER, "a brand new password")
+            accounts.set_password(TEST_USER, "a brand new password", OWNER_PLAN_START)
             self.assertEqual(client.get("/api/data").status_code, 401)
+            self.assertEqual(login(client, password="a brand new password").status_code, 200)
         finally:
-            time.sleep(0.02)
-            auth.write_credentials(TEST_USER, TEST_PASSWORD)
+            accounts.set_password(TEST_USER, TEST_PASSWORD, OWNER_PLAN_START)
 
-    def test_no_login_file_means_no_sign_in(self):
-        with mock.patch.object(auth.config, "AUTH_FILE", AUTH_FILE.with_name("missing.env")):
+    def test_usernames_are_not_case_sensitive(self):
+        self.assertEqual(login(TestClient(app), username=TEST_USER.upper()).status_code, 200)
+
+    def test_no_account_with_a_password_means_no_sign_in(self):
+        with mock.patch.object(accounts, "any_can_sign_in", return_value=False):
             client = TestClient(app)
             self.assertFalse(client.get("/api/auth/session").json()["configured"])
             self.assertEqual(login(client).status_code, 503)

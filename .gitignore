@@ -24,3 +24,6 @@ __pycache__/
 /strava_tokens.json
 # Copies the app makes before changing the database's structure
 /backups/
+
+# The database: training data and accounts of everyone using the app (not for a public repo)
+/marathon.db

@@ -1,9 +1,12 @@
 """Import workouts from Strava into the activity log.
 
-Setup (once):
-  1. Create an API application at https://www.strava.com/settings/api and put its Client ID and
-     Client Secret in strava.env (see strava.env.example).
-  2. Click "Connect with Strava" on the Activity log page and approve access on Strava's site.
+Setup (once, on the server): create an API application at https://www.strava.com/settings/api and
+put its Client ID and Client Secret in strava.env (see strava.env.example). Each user then connects
+their own Strava account: new users do it as the last step of registering (the app can't be used
+until they have), and it's shown on the Activity log page afterwards.
+
+Strava limits how many athletes one API application can connect (1, the app's owner, until Strava
+raises it). Past that, connecting fails with Strava's error, shown on the connect page.
 
 Syncing is manual: nothing is fetched until you click "Sync now" on the Activity log page. Each
 sync asks for activities since shortly before the newest one already seen, never earlier than the
@@ -13,8 +16,8 @@ The same workout often reaches Strava twice (a watch and Peloton both upload the
 of the same kind whose times overlap by more than half are treated as one workout: only the most
 complete (has distance, then output) becomes an entry, and the others are tied to it.
 
-The OAuth tokens live in config.STRAVA_TOKEN_FILE (git-ignored), not marathon.db, because the
-database is committed to git.
+The OAuth tokens and sync state live in config.STRAVA_TOKEN_FILE (git-ignored), keyed by user id,
+not in marathon.db: secrets stay out of the database file.
 """
 import json
 import logging
@@ -32,7 +35,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from backend.app.core import config
-from backend.app.core.database import SessionLocal
+from backend.app.core.database import Tenant, user_session
 from backend.app.core.errors import AppError, ConflictError
 from backend.app.repository import repository as repo
 from backend.app.schemas.schemas import ActivityIn
@@ -74,8 +77,8 @@ class StravaError(AppError):
     status_code = 502
 
 
-# Why the last attempt to connect failed; shown on the Activity log page until the next attempt.
-connect_error: Optional[str] = None
+# Why each user's last attempt to connect failed; shown until their next attempt.
+connect_errors: dict[int, str] = {}
 
 
 # --------------------------------------------------------------------------
@@ -89,26 +92,45 @@ def client_settings() -> Optional[tuple[str, str]]:
     return (client_id, secret) if client_id and secret else None
 
 
-def _load_state() -> Optional[dict[str, Any]]:
+# One lock around every read-modify-write of the token file (all users share it).
+_file_lock = threading.RLock()
+
+
+def _load_all() -> dict[str, dict[str, Any]]:
+    """{user id (as text): that user's tokens and sync state}."""
     try:
-        return json.loads(config.STRAVA_TOKEN_FILE.read_text(encoding="utf-8"))
+        data = json.loads(config.STRAVA_TOKEN_FILE.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return None
+        return {}
+    if "access_token" in data:  # the single-user format: it was user 1's (the database's owner)
+        return {"1": data}
+    return data.get("users", {})
 
 
-def _save_state(state: dict[str, Any]) -> None:
-    # Write then rename, so a crash never leaves half a token file behind.
-    tmp = config.STRAVA_TOKEN_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    os.replace(tmp, config.STRAVA_TOKEN_FILE)
+def _load_state(user_id: int) -> Optional[dict[str, Any]]:
+    return _load_all().get(str(user_id))
 
 
-def is_connected() -> bool:
-    return _load_state() is not None
+def _save_state(user_id: int, state: Optional[dict[str, Any]]) -> None:
+    """Save (or with None, forget) one user's state. Write then rename, so a crash never leaves
+    half a token file behind."""
+    with _file_lock:
+        everyone = _load_all()
+        if state is None:
+            everyone.pop(str(user_id), None)
+        else:
+            everyone[str(user_id)] = state
+        tmp = config.STRAVA_TOKEN_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"users": everyone}, indent=2), encoding="utf-8")
+        os.replace(tmp, config.STRAVA_TOKEN_FILE)
 
 
-def status() -> dict[str, Any]:
-    state = _load_state() or {}
+def is_connected(user_id: int) -> bool:
+    return _load_state(user_id) is not None
+
+
+def status(user_id: int) -> dict[str, Any]:
+    state = _load_state(user_id) or {}
     return {
         "configured": client_settings() is not None,
         "connected": bool(state),
@@ -116,7 +138,7 @@ def status() -> dict[str, Any]:
         "sync_start": state.get("sync_start"),
         "last_sync": state.get("last_sync"),
         "last_result": state.get("last_result"),
-        "last_error": state.get("last_error") or connect_error,
+        "last_error": state.get("last_error") or connect_errors.get(user_id),
     }
 
 
@@ -163,9 +185,9 @@ def authorize_url(redirect_uri: str, state: str) -> str:
     return f"{AUTHORIZE_URL}?{query}"
 
 
-def connect(code: str, granted_scope: str, today: date) -> dict[str, Any]:
-    """Finish connecting: trade the code from Strava's redirect for tokens and save them."""
-    global connect_error
+def connect(user_id: int, code: str, granted_scope: str, today: date) -> dict[str, Any]:
+    """Finish connecting: trade the code from Strava's redirect for tokens and save them.
+    A Strava account can only be connected to one user."""
     try:
         if not {"activity:read", "activity:read_all"} & set(granted_scope.split(",")):
             raise StravaError("Strava access to your activities wasn't granted. "
@@ -175,10 +197,13 @@ def connect(code: str, granted_scope: str, today: date) -> dict[str, Any]:
             raise ConflictError("Strava isn't set up: add STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET to strava.env.")
         tokens = _request(TOKEN_URL, form={"client_id": client_id, "client_secret": secret, "code": code,
                                            "grant_type": "authorization_code"})
+        athlete = tokens.get("athlete") or {}
+        others = {uid for uid, st in _load_all().items() if st.get("athlete_id") == athlete.get("id")}
+        if athlete.get("id") is not None and others - {str(user_id)}:
+            raise ConflictError("That Strava account is already connected to another user of this app.")
     except AppError as e:
-        connect_error = e.detail
+        connect_errors[user_id] = e.detail
         raise
-    athlete = tokens.get("athlete") or {}
     state = {
         "access_token": tokens["access_token"],
         "refresh_token": tokens["refresh_token"],
@@ -192,27 +217,27 @@ def connect(code: str, granted_scope: str, today: date) -> dict[str, Any]:
         "last_result": None,
         "last_error": None,
     }
-    _save_state(state)
-    connect_error = None
-    log.info("Connected to Strava as %s (athlete %s); importing from %s",
-             state["athlete_name"], state["athlete_id"], state["sync_start"])
-    return status()
+    _save_state(user_id, state)
+    connect_errors.pop(user_id, None)
+    log.info("User %s connected to Strava as %s (athlete %s); importing from %s",
+             user_id, state["athlete_name"], state["athlete_id"], state["sync_start"])
+    return status(user_id)
 
 
-def disconnect() -> dict[str, Any]:
+def disconnect(user_id: int) -> dict[str, Any]:
     """Revoke the app's access on Strava (best effort) and forget the tokens. Imported activities stay."""
-    state = _load_state()
+    state = _load_state(user_id)
     if state:
         try:
             _request(DEAUTHORIZE_URL, form={"access_token": state["access_token"]})
         except StravaError as e:
             log.warning("Strava deauthorize failed (tokens forgotten anyway): %s", e.detail)
-        config.STRAVA_TOKEN_FILE.unlink(missing_ok=True)
-        log.info("Disconnected from Strava")
-    return status()
+        _save_state(user_id, None)
+        log.info("User %s disconnected from Strava", user_id)
+    return status(user_id)
 
 
-def _access_token(state: dict[str, Any]) -> str:
+def _access_token(user_id: int, state: dict[str, Any]) -> str:
     """A valid access token, refreshing it (Strava's last about 6 hours) when it is about to expire."""
     if state["expires_at"] > time.time() + 300:
         return state["access_token"]
@@ -223,8 +248,8 @@ def _access_token(state: dict[str, Any]) -> str:
                                        "refresh_token": state["refresh_token"], "grant_type": "refresh_token"})
     state.update(access_token=tokens["access_token"], refresh_token=tokens["refresh_token"],
                  expires_at=tokens["expires_at"])
-    _save_state(state)
-    log.info("Strava access token refreshed")
+    _save_state(user_id, state)
+    log.info("Strava access token refreshed for user %s", user_id)
     return state["access_token"]
 
 
@@ -297,10 +322,11 @@ def _completeness(item: tuple[dict, dict]) -> tuple:
 _sync_lock = threading.Lock()
 
 
-def sync(session_factory: Callable[[], Session] = SessionLocal) -> dict[str, Any]:
-    """Fetch recent Strava activities and import any new ones. Returns counts per outcome."""
+def sync(tenant: Tenant, session_factory: Callable[[Tenant], Session] = user_session) -> dict[str, Any]:
+    """Fetch the user's recent Strava activities and import any new ones. Returns counts per outcome."""
+    user_id = tenant.user_id
     with _sync_lock:
-        state = _load_state()
+        state = _load_state(user_id)
         if state is None:
             raise ConflictError("Strava isn't connected.")
         sync_start = date.fromisoformat(state["sync_start"])
@@ -311,7 +337,7 @@ def sync(session_factory: Callable[[], Session] = SessionLocal) -> dict[str, Any
 
         counts = {"created": 0, "matched": 0, "duplicates": 0, "known": 0, "skipped": 0}
         try:
-            token = _access_token(state)
+            token = _access_token(user_id, state)
             activities, page = [], 1
             while True:
                 batch = _request(f"{ACTIVITIES_URL}?after={after}&per_page={PAGE_SIZE}&page={page}", token=token)
@@ -332,7 +358,7 @@ def sync(session_factory: Callable[[], Session] = SessionLocal) -> dict[str, Any
                 else:
                     items.append((a, values))
 
-            with session_factory() as session:
+            with session_factory(tenant) as session:
                 for group in group_recordings(items):
                     best, best_values = max(group, key=_completeness)
                     seen = repo.strava_import_for(session, [a["id"] for a, _ in group])
@@ -349,8 +375,8 @@ def sync(session_factory: Callable[[], Session] = SessionLocal) -> dict[str, Any
                         counts["duplicates" if outcome == "duplicate" else outcome] += 1
         except AppError as e:
             state["last_error"] = e.detail
-            _save_state(state)
-            log.warning("Strava sync failed: %s", e.detail)
+            _save_state(user_id, state)
+            log.warning("Strava sync failed for user %s: %s", user_id, e.detail)
             raise
 
         if activities:
@@ -358,8 +384,8 @@ def sync(session_factory: Callable[[], Session] = SessionLocal) -> dict[str, Any
             state["newest_start"] = max(state.get("newest_start") or 0, newest)
         state.update(last_sync=datetime.now().astimezone().isoformat(timespec="seconds"),
                      last_result=counts, last_error=None)
-        _save_state(state)
-        log.info("Strava sync: %s new, %s matched to entries already logged, %s second recordings, "
-                 "%s already imported, %s skipped", counts["created"], counts["matched"], counts["duplicates"],
-                 counts["known"], counts["skipped"])
+        _save_state(user_id, state)
+        log.info("Strava sync for user %s: %s new, %s matched to entries already logged, %s second recordings, "
+                 "%s already imported, %s skipped", user_id, counts["created"], counts["matched"],
+                 counts["duplicates"], counts["known"], counts["skipped"])
         return counts

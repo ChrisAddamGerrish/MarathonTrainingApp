@@ -35,7 +35,7 @@ def read_env_file(path: Path) -> dict[str, str]:
 LOG_DIR = Path(os.environ.get("MARATHON_LOG_DIR", BASE_DIR / "logs"))
 LOG_LEVEL = os.environ.get("MARATHON_LOG_LEVEL", "INFO").upper()
 
-# The plan stores week + weekday, not calendar dates. Week 1 / Monday is the
-# first logged day in activity_log (W1-Mon = 2026-09-14). Override with the
-# MARATHON_PLAN_START env var (must be a Monday) if the plan is ever re-based.
+# The plan stores week + weekday, not calendar dates; each user's week 1 starts on their own
+# users.plan_start (a Monday). This is only the start given to the original single-user data when
+# the database is migrated to multiple users (W1-Mon = 2026-09-14); MARATHON_PLAN_START overrides it.
 PLAN_START = date.fromisoformat(os.environ.get("MARATHON_PLAN_START", "2026-09-14"))

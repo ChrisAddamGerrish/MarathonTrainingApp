@@ -13,7 +13,7 @@ from sqlalchemy import delete, select
 from backend.app.core import config
 from backend.app.core.database import SessionLocal, engine, init_db
 from backend.app.main import app
-from backend.app.models.models import ActivityLog, TrainingPlan
+from backend.app.models.models import ActivityLog, PlanWeek, TrainingPlan
 
 WEEK = 19  # far enough ahead that nothing is logged in it
 
@@ -38,7 +38,7 @@ class PlanEditTests(unittest.TestCase):
         self.client = signed_in_client()
         with SessionLocal() as s:
             self.original_ids = set(s.scalars(select(TrainingPlan.plan_id)))
-            self.week_type = s.scalar(select(TrainingPlan.week_type).where(TrainingPlan.week == WEEK).limit(1))
+            self.week_type = s.scalar(select(PlanWeek.week_type).where(PlanWeek.user_id == 1, PlanWeek.week == WEEK))
 
     def tearDown(self):
         with SessionLocal() as s:

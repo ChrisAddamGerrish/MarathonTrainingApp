@@ -4,7 +4,6 @@ Strava itself is never called: strava._request is replaced with a fake.
 
 Run from the project root:   .venv\\Scripts\\python.exe -m unittest tests.test_strava -v
 """
-import json
 import time
 import unittest
 from datetime import date
@@ -12,12 +11,12 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
-from tests import TEST_DB, TMP, signed_in_client
+from tests import OWNER_ID, TEST_DB, TMP, owner_session, owner_tenant, signed_in_client
 
 from sqlalchemy import delete, select
 
 from backend.app.core import config
-from backend.app.core.database import SessionLocal, engine, init_db
+from backend.app.core.database import engine, init_db
 from backend.app.models.models import ActivityLog, StravaImport, TrainingPlan
 from backend.app.repository import repository as repo
 from backend.app.services import strava
@@ -46,7 +45,7 @@ def strava_activity(strava_id, day, sport="Run", **extra):
 
 
 def plan_ids(day, category):
-    with SessionLocal() as s:
+    with owner_session() as s:
         return list(s.scalars(select(TrainingPlan.plan_id).where(
             TrainingPlan.week == 2, TrainingPlan.day == day.strftime("%a"), TrainingPlan.category == category,
         ).order_by(TrainingPlan.entry_order)))
@@ -56,20 +55,20 @@ class WeekTwoCleanup(unittest.TestCase):
     """Leaves week 2, the import records and the Strava files as it found them."""
 
     def tearDown(self):
-        with SessionLocal() as s:
+        with owner_session() as s:
             s.execute(delete(ActivityLog).where(ActivityLog.activity_date.between(WEEK2[0], WEEK2[-1])))
             s.execute(delete(StravaImport))
             s.commit()
         config.STRAVA_TOKEN_FILE.unlink(missing_ok=True)
         config.STRAVA_CONFIG_FILE.unlink(missing_ok=True)
-        strava.connect_error = None
+        strava.connect_errors.clear()
 
     def run_import(self, activity):
-        with SessionLocal() as s:
+        with owner_session() as s:
             return repo.import_strava_activity(s, activity["id"], strava.to_activity(activity))
 
     def activity(self, activity_id):
-        with SessionLocal() as s:
+        with owner_session() as s:
             return repo.get_activity(s, activity_id)
 
 
@@ -121,12 +120,12 @@ class ImportRuleTests(WeekTwoCleanup):
 
     def test_deleted_import_stays_deleted(self):
         created = self.run_import(strava_activity(12, THU))
-        with SessionLocal() as s:
+        with owner_session() as s:
             repo.delete_activity(s, created["activity_id"])
         self.assertEqual(self.run_import(strava_activity(12, THU))["outcome"], "known")
 
     def test_workout_already_logged_by_hand_is_matched_not_duplicated(self):
-        with SessionLocal() as s:
+        with owner_session() as s:
             mine = repo.create_activity(s, {"activity_date": THU, "category": "Run", "actual_session": "my run",
                                             "distance_mi": 5, "duration_min": 44, "output_kj": None,
                                             "plan_id": None, "notes": None})
@@ -156,12 +155,12 @@ class ImportRuleTests(WeekTwoCleanup):
 
     def test_skipped_session_is_not_linked(self):
         (thu_run,) = plan_ids(THU, "Run")
-        with SessionLocal() as s:
+        with owner_session() as s:
             repo.skip_session(s, thu_run, "sick")
         try:
             self.assertIsNone(self.run_import(strava_activity(31, THU))["plan_id"])
         finally:
-            with SessionLocal() as s:
+            with owner_session() as s:
                 repo.unskip_session(s, thu_run)
 
     def test_session_moved_to_a_later_day_is_linked(self):
@@ -181,7 +180,7 @@ class ImportRuleTests(WeekTwoCleanup):
 
     def test_imports_are_recorded_in_history(self):
         created = self.run_import(strava_activity(32, THU))
-        with SessionLocal() as s:
+        with owner_session() as s:
             entries = repo.history_entries(s, created["activity_id"], 10)
         self.assertEqual([e["action"] for e in entries], ["INSERT"])
 
@@ -214,7 +213,14 @@ def write_tokens(**overrides):
     state = {"access_token": "access-1", "refresh_token": "refresh-1", "expires_at": int(time.time()) + 3600,
              "athlete_id": 42, "athlete_name": "Test Runner", "sync_start": "2026-09-21", "newest_start": None,
              "last_sync": None, "last_result": None, "last_error": None, **overrides}
-    config.STRAVA_TOKEN_FILE.write_text(json.dumps(state), encoding="utf-8")
+    strava._save_state(OWNER_ID, state)
+
+
+def signed_in_without_strava():
+    """A signed-in client for the owner, whose (faked) Strava connection is then removed."""
+    client = signed_in_client()
+    strava._save_state(OWNER_ID, None)
+    return client
 
 
 class SyncTests(WeekTwoCleanup):
@@ -224,12 +230,12 @@ class SyncTests(WeekTwoCleanup):
         fake = FakeStrava([strava_activity(40, THU), strava_activity(41, TUE, "Ride"),
                            strava_activity(42, TUE, "Walk"), strava_activity(43, date(2026, 9, 20))])
         with mock.patch.object(strava, "_request", fake):
-            counts = strava.sync()
-            again = strava.sync()
+            counts = strava.sync(owner_tenant())
+            again = strava.sync(owner_tenant())
         self.assertEqual(counts, {"created": 2, "matched": 0, "duplicates": 0, "known": 0, "skipped": 2})  # walk; before start
         self.assertEqual(again["known"], 2)
         self.assertEqual(fake.calls[0][2], "access-1")
-        status = strava.status()
+        status = strava.status(OWNER_ID)
         self.assertEqual(status["last_result"], again)
         self.assertIsNone(status["last_error"])
 
@@ -240,9 +246,9 @@ class SyncTests(WeekTwoCleanup):
                                 start_date=f"{TUE}T10:58:00Z")
         peloton = strava_activity(71, TUE, "VirtualRide", distance=30545, kilojoules=640.2, elapsed_time=3600)
         with mock.patch.object(strava, "_request", FakeStrava([watch, peloton])):
-            counts = strava.sync()
+            counts = strava.sync(owner_tenant())
         self.assertEqual((counts["created"], counts["duplicates"]), (1, 1))
-        with SessionLocal() as s:
+        with owner_session() as s:
             rides = [a for a in repo.activity_rows(s) if a["activity_date"] == TUE.isoformat()]
         self.assertEqual(len(rides), 1)
         self.assertEqual(rides[0]["actual_session"], "VirtualRide 71")  # the copy with distance and output
@@ -254,11 +260,11 @@ class SyncTests(WeekTwoCleanup):
         watch = strava_activity(72, TUE, "Ride", name="Morning Ride", distance=0, elapsed_time=3700)
         peloton = strava_activity(73, TUE, "VirtualRide", distance=30545, kilojoules=640.2, elapsed_time=3600)
         with mock.patch.object(strava, "_request", FakeStrava([watch])):
-            strava.sync()
+            strava.sync(owner_tenant())
         with mock.patch.object(strava, "_request", FakeStrava([watch, peloton])):
-            counts = strava.sync()
+            counts = strava.sync(owner_tenant())
         self.assertEqual((counts["known"], counts["duplicates"], counts["created"]), (1, 1, 0))
-        with SessionLocal() as s:
+        with owner_session() as s:
             (ride,) = [a for a in repo.activity_rows(s) if a["activity_date"] == TUE.isoformat()]
         self.assertEqual((ride["actual_session"], ride["distance_mi"], ride["output_kj"]), ("Morning Ride", 18.98, 640.2))
 
@@ -269,12 +275,12 @@ class SyncTests(WeekTwoCleanup):
                                   moving_time=300, start_date=f"{WED}T10:50:00Z")
         upper = strava_activity(77, WED, "WeightTraining", name="30 min Upper Body", start_date=f"{WED}T11:00:00Z")
         with mock.patch.object(strava, "_request", FakeStrava([warm_up, upper])):
-            strava.sync()
-        with SessionLocal() as s:
+            strava.sync(owner_tenant())
+        with owner_session() as s:
             links = {a["actual_session"]: a["plan_id"] for a in repo.activity_rows(s)
                      if a["activity_date"] == WED.isoformat()}
         self.assertEqual(links, {"5 min Pre-Run Warm Up": None, "30 min Upper Body": "W2-Wed-Upper"})
-        with SessionLocal() as s:
+        with owner_session() as s:
             categories = {a["actual_session"]: a["category"] for a in repo.activity_rows(s)
                           if a["activity_date"] == WED.isoformat()}
         self.assertEqual(categories["5 min Pre-Run Warm Up"], "Stretch")
@@ -285,25 +291,25 @@ class SyncTests(WeekTwoCleanup):
         first = strava_activity(74, THU, elapsed_time=2700, start_date=f"{THU}T11:00:00Z")
         second = strava_activity(75, THU, elapsed_time=900, start_date=f"{THU}T11:46:00Z")
         with mock.patch.object(strava, "_request", FakeStrava([first, second])):
-            self.assertEqual(strava.sync()["created"], 2)
+            self.assertEqual(strava.sync(owner_tenant())["created"], 2)
 
     def test_expired_token_is_refreshed_first(self):
         write_settings()
         write_tokens(expires_at=int(time.time()) - 10)
         fake = FakeStrava()
         with mock.patch.object(strava, "_request", fake):
-            strava.sync()
+            strava.sync(owner_tenant())
         self.assertEqual(fake.calls[0][0], strava.TOKEN_URL)
         self.assertEqual(fake.calls[0][1]["refresh_token"], "refresh-1")
         self.assertEqual(fake.calls[1][2], "access-2")
-        self.assertEqual(json.loads(config.STRAVA_TOKEN_FILE.read_text())["refresh_token"], "refresh-2")
+        self.assertEqual(strava._load_state(OWNER_ID)["refresh_token"], "refresh-2")
 
     def test_pages_are_followed(self):
         write_settings()
         write_tokens()
         fake = FakeStrava([strava_activity(100 + i, THU, "Walk") for i in range(strava.PAGE_SIZE + 5)])
         with mock.patch.object(strava, "_request", fake):
-            self.assertEqual(strava.sync()["skipped"], strava.PAGE_SIZE + 5)
+            self.assertEqual(strava.sync(owner_tenant())["skipped"], strava.PAGE_SIZE + 5)
         self.assertEqual(len(fake.calls), 2)
 
     def test_later_syncs_start_near_the_newest_activity(self):
@@ -311,7 +317,7 @@ class SyncTests(WeekTwoCleanup):
         write_tokens(newest_start=int(time.time()))
         fake = FakeStrava()
         with mock.patch.object(strava, "_request", fake):
-            strava.sync()
+            strava.sync(owner_tenant())
         after = int(parse_qs(urlparse(fake.calls[0][0]).query)["after"][0])
         self.assertAlmostEqual(after, time.time() - strava.OVERLAP.total_seconds(), delta=60)
 
@@ -320,11 +326,11 @@ class SyncTests(WeekTwoCleanup):
         write_tokens()
         with mock.patch.object(strava, "_request", FakeStrava(fail="Strava is down")):
             with self.assertRaises(strava.StravaError):
-                strava.sync()
-        self.assertEqual(strava.status()["last_error"], "Strava is down")
+                strava.sync(owner_tenant())
+        self.assertEqual(strava.status(OWNER_ID)["last_error"], "Strava is down")
 
     def test_sync_without_connection_is_refused(self):
-        self.assertEqual(signed_in_client().post("/api/strava/sync").status_code, 409)
+        self.assertEqual(signed_in_without_strava().post("/api/strava/sync").status_code, 409)
 
 
 class ConnectTests(WeekTwoCleanup):
@@ -335,7 +341,7 @@ class ConnectTests(WeekTwoCleanup):
         self.assertEqual(TestClient(app).get("/api/strava/status").status_code, 401)
 
     def test_status_before_setup(self):
-        status = signed_in_client().get("/api/strava/status").json()
+        status = signed_in_without_strava().get("/api/strava/status").json()
         self.assertEqual((status["configured"], status["connected"]), (False, False))
 
     def test_connect_then_callback_saves_tokens_without_syncing(self):
@@ -363,30 +369,31 @@ class ConnectTests(WeekTwoCleanup):
 
     def test_callback_with_unknown_state_is_refused(self):
         write_settings()
+        client = signed_in_without_strava()
         with mock.patch.object(strava, "_request", FakeStrava()) as fake:
-            signed_in_client().get("/api/strava/callback", params={"state": "made-up", "code": "abc",
+            client.get("/api/strava/callback", params={"state": "made-up", "code": "abc",
                                                                    "scope": "activity:read_all"})
         self.assertEqual(fake.calls, [])
-        self.assertFalse(strava.is_connected())
-        self.assertIn("Connect again", strava.status()["last_error"])
+        self.assertFalse(strava.is_connected(OWNER_ID))
+        self.assertIn("Connect again", strava.status(OWNER_ID)["last_error"])
 
     def test_missing_activity_permission_is_explained(self):
         write_settings()
-        client = signed_in_client()
+        client = signed_in_without_strava()
         state = parse_qs(urlparse(client.get("/api/strava/connect", follow_redirects=False)
                                   .headers["location"]).query)["state"][0]
         client.get("/api/strava/callback", params={"state": state, "code": "abc", "scope": "read"})
-        self.assertFalse(strava.is_connected())
-        self.assertIn("View data about your activities", strava.status()["last_error"])
+        self.assertFalse(strava.is_connected(OWNER_ID))
+        self.assertIn("View data about your activities", strava.status(OWNER_ID)["last_error"])
 
     def test_disconnect_forgets_tokens_but_keeps_imports(self):
         write_settings()
         write_tokens()
         with mock.patch.object(strava, "_request", FakeStrava([strava_activity(60, THU)])):
-            strava.sync()
+            strava.sync(owner_tenant())
             status = signed_in_client().post("/api/strava/disconnect").json()
         self.assertFalse(status["connected"])
-        with SessionLocal() as s:
+        with owner_session() as s:
             self.assertEqual(s.scalar(select(ActivityLog.category).where(ActivityLog.activity_date == THU)), "Run")
 
 

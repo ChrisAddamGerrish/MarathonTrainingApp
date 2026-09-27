@@ -3,7 +3,7 @@ import { BrandMark } from "../components/common";
 import { api, jsonRequest } from "../services/api";
 
 /** Sign-in page. onSignedIn receives the session status from the server. */
-export default function Login({ configured, expired, onSignedIn }) {
+export default function Login({ configured, expired, onSignedIn, onRegister }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
@@ -77,6 +77,11 @@ export default function Login({ configured, expired, onSignedIn }) {
         <button className="btn primary" type="submit" disabled={busy || !configured}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
+        {configured && (
+          <button className="btn ghost" type="button" onClick={onRegister}>
+            Have an invite code? Create an account
+          </button>
+        )}
       </form>
     </div>
   );

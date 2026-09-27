@@ -74,7 +74,7 @@ export default function Dashboard() {
       <div className="section">
         <div className="section-head">
           <h2>Weekly run miles</h2>
-          <span className="sub">Planned vs. actual across the 20-week plan</span>
+          <span className="sub">Planned vs. actual across the {s.last_week}-week plan</span>
           <span className="spacer" />
           <button className="btn small" onClick={() => setChartTable(t => !t)}>
             {chartTable ? "Show chart" : "Show table"}
