@@ -75,7 +75,7 @@ function Shell({ user, isAdmin, onSignOut }) {
   const { data, error, reload } = useData();
   const { tab, arg } = useRoute();
   // Filters live here so they survive switching tabs.
-  const [filters, setFilters] = useState({ category: "", week: "", q: "" });
+  const [filters, setFilters] = useState({ categories: [], weeks: [], q: "", oldestFirst: false });
 
   useEffect(() => {
     document.title = `${TAB_TITLES[tab]} · Marathon Training`;
