@@ -12,10 +12,11 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- App ---------------------------------------------------------------------------------------
-FROM python:3.14-slim
+# Alpine: every compiled dependency has a musl wheel in uv.lock, so nothing is built from source.
+FROM python:3.14-alpine
 
 # tzdata: the plan's "today" follows the TZ environment variable.
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache tzdata
 
 ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
@@ -25,14 +26,16 @@ ENV PYTHONUNBUFFERED=1 \
     MARATHON_AUTH_FILE=/app/secrets/auth.env
 
 WORKDIR /app
-# Dependencies first, so code changes don't reinstall them. uv is only mounted for this step, not shipped.
+# Dependencies first, so code changes don't reinstall them. uv and its download cache are only
+# mounted for this step (the cache also speeds up rebuilds), so neither ends up in the image.
 COPY pyproject.toml uv.lock ./
 RUN --mount=from=ghcr.io/astral-sh/uv:0.12,source=/uv,target=/usr/local/bin/uv \
+    --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project
 COPY backend/ backend/
 COPY --from=frontend /src/frontend/dist frontend/dist
 
-RUN useradd --uid 1000 --no-create-home --shell /usr/sbin/nologin marathon \
+RUN adduser -D -H -u 1000 -s /sbin/nologin marathon \
     && mkdir -p data secrets && chown marathon:marathon data secrets
 USER marathon
 
