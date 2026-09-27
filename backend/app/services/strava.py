@@ -1,7 +1,8 @@
 """Import workouts from Strava into the activity log.
 
 Setup (once, on the server): create an API application at https://www.strava.com/settings/api and
-put its Client ID and Client Secret in strava.env (see strava.env.example). Each user then connects
+put its Client ID and Client Secret in strava.env (see strava.env.example), or in the environment
+variables STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET, which win (the Docker setup uses those). Each user then connects
 their own Strava account: new users do it as the last step of registering (the app can't be used
 until they have), and it's shown on the Activity log page afterwards.
 
@@ -116,6 +117,7 @@ connect_errors: dict[int, str] = {}
 
 def client_settings() -> Optional[tuple[str, str]]:
     values = config.read_env_file(config.STRAVA_CONFIG_FILE)
+    values.update({k: os.environ[k] for k in ("STRAVA_CLIENT_ID", "STRAVA_CLIENT_SECRET") if os.environ.get(k)})
     client_id, secret = values.get("STRAVA_CLIENT_ID"), values.get("STRAVA_CLIENT_SECRET")
     return (client_id, secret) if client_id and secret else None
 

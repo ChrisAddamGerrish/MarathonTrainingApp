@@ -1,0 +1,61 @@
+# Marathon Training in Docker (see README.md, "Docker").
+#
+#   docker compose up -d --build                    the app, on http://localhost:8000 (this PC only)
+#   docker compose --profile proxy up -d --build    plus Caddy, to reach it from other devices
+#   docker compose exec app python -m backend.cli   create the first admin / change a password
+#
+# Settings: .env next to this file (see .env.example) for TZ and the port, strava.env for the
+# Strava API app, deploy/caddy.env for where Caddy listens. All optional and git-ignored.
+name: marathon
+
+services:
+  app:
+    build: .
+    image: marathon:latest
+    restart: unless-stopped
+    env_file:
+      - path: strava.env # STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET
+        required: false
+    environment:
+      TZ: ${TZ:-UTC} # the plan's "today" follows this
+      MARATHON_LOG_LEVEL: ${MARATHON_LOG_LEVEL:-INFO}
+      # Trust X-Forwarded-* from Caddy. Safe while the port below is published on 127.0.0.1 only.
+      FORWARDED_ALLOW_IPS: "*"
+    ports:
+      - "127.0.0.1:${MARATHON_PORT:-8000}:8000"
+    volumes:
+      - data:/app/data # database, backups/, logs/, strava_tokens.json
+      - secrets:/app/secrets # auth.env: the cookie-signing key, created on first start
+
+  caddy:
+    image: caddy:2
+    profiles: [proxy]
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    working_dir: /srv # the Caddyfile's access log goes to data/logs/ under here
+    env_file:
+      - path: deploy/caddy.env # MARATHON_SITE / MARATHON_TLS
+        required: false
+    environment:
+      MARATHON_APP_HOST: app
+      MARATHON_APP_PORT: "8000"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "8080:8080"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates
+      - caddy_config:/config
+      - caddy_logs:/srv/data/logs
+
+volumes:
+  data:
+  secrets:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
