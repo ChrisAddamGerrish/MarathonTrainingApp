@@ -218,8 +218,11 @@ table.data tr.clickable:hover td { background: var(--surface-2); }
 
 /* ---------- Recent list ---------- */
 .recent { list-style: none; margin: 0; padding: 0; }
-.recent li { display: grid; grid-template-columns: 84px 84px 1fr auto; gap: 12px; align-items: center; padding: 10px 20px; border-top: 1px solid var(--line); }
+.recent li { border-top: 1px solid var(--line); }
 .recent li:first-child { border-top: 0; }
+.restore-summary { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.recent li > a { display: grid; grid-template-columns: 84px 84px 1fr auto; gap: 12px; align-items: center; padding: 10px 20px; color: inherit; text-decoration: none; }
+.recent li > a:hover { background: var(--surface-2); }
 .recent .when { color: var(--muted); font-size: 13px; }
 .recent .what { overflow-wrap: anywhere; }
 .recent .stats { color: var(--ink-2); font-size: 13px; text-align: right; }
@@ -341,7 +344,7 @@ dialog form[hidden] { display: none; }
   .hist li { padding: 12px 14px; }
   .day { grid-template-columns: 1fr; padding: 12px 14px 4px; }
   .day-label { display: flex; gap: 8px; align-items: baseline; padding-top: 0; }
-  .recent li { grid-template-columns: 1fr auto; padding: 10px 14px; }
+  .recent li > a { grid-template-columns: 1fr auto; padding: 10px 14px; }
   .recent .when { grid-column: 1; }
   .recent .chipcell { grid-column: 2; grid-row: 1; justify-self: end; }
   .recent .what { grid-column: 1 / -1; }

@@ -1,15 +1,30 @@
+import { useEffect } from "react";
 import { useData } from "../contexts/DataContext";
 import { useDialogs } from "../contexts/DialogContext";
 import { CATEGORIES, fmtDate, fmtMi, fmtMin, isRun, pace } from "../utils/format";
 import { Chip, ClickableRow } from "../components/common";
 import StravaPanel from "../components/StravaPanel";
+import { workoutsCsv } from "../utils/csv";
+import BackupButtons from "../components/BackupButtons";
+import { useToast } from "../contexts/ToastContext";
 
 const Dash = () => <span className="muted">—</span>;
 
-export default function Log({ filters, setFilters }) {
+export default function Log({ arg, filters, setFilters }) {
   const { data } = useData();
   const { openNew, openEdit } = useDialogs();
+  const toast = useToast();
   const { activities, weeks, plan } = data;
+
+  // #/log/<id> (utils/links.js) opens that workout, then drops the id so closing the dialog sticks
+  // and the same link works again. replace() keeps the back button going to where you came from.
+  useEffect(() => {
+    if (!arg) return;
+    const a = activities.find(x => String(x.activity_id) === arg);
+    if (a) openEdit(a);
+    else toast(`Workout ${arg} wasn't found`, true);
+    window.location.replace("#/log");
+  }, [arg, activities, openEdit, toast]);
 
   const q = filters.q.trim().toLowerCase();
   const list = activities.filter(
@@ -32,6 +47,15 @@ export default function Log({ filters, setFilters }) {
           {list.length} {list.length === 1 ? "activity" : "activities"} · {fmtMi(totals.mi)} run · {fmtMin(totals.min)}
         </span>
         <span className="spacer" />
+        <BackupButtons
+          kind="workouts"
+          exportCsv={list.length ? () => workoutsCsv(list, plan) : null}
+          exportTitle={
+            list.length < activities.length
+              ? `Download the ${list.length} activities shown (clear the filters for a full backup)`
+              : "Download every activity, each with a link to its details"
+          }
+        />
         <button className="btn primary" onClick={openNew}>
           + Log activity
         </button>

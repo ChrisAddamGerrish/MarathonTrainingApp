@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useData } from "../contexts/DataContext";
 import { useDialogs } from "../contexts/DialogContext";
 import { activityStats, fmtDate, focusWeek } from "../utils/format";
+import { weekHref, workoutHref } from "../utils/links";
 import { Chip } from "../components/common";
 import WeekDetail from "../components/WeekDetail";
 import WeeklyChart from "../components/WeeklyChart";
@@ -98,7 +99,7 @@ export default function Dashboard() {
         <div className="section-head">
           <h2>{before ? "First week" : after ? "Final week" : "This week"}</h2>
           <span className="spacer" />
-          <a className="btn small" href={`#/plan/${fw}`}>
+          <a className="btn small" href={weekHref(fw)}>
             Open in Plan
           </a>
         </div>
@@ -121,12 +122,14 @@ export default function Dashboard() {
             <ul className="recent">
               {activities.slice(0, 6).map(a => (
                 <li key={a.activity_id}>
-                  <span className="when">{fmtDate(a.activity_date, { month: "short", day: "numeric" })}</span>
-                  <span className="chipcell">
-                    <Chip category={a.category} />
-                  </span>
-                  <span className="what">{a.actual_session}</span>
-                  <span className="stats num">{activityStats(a)}</span>
+                  <a href={workoutHref(a)} title="Open workout details">
+                    <span className="when">{fmtDate(a.activity_date, { month: "short", day: "numeric" })}</span>
+                    <span className="chipcell">
+                      <Chip category={a.category} />
+                    </span>
+                    <span className="what">{a.actual_session}</span>
+                    <span className="stats num">{activityStats(a)}</span>
+                  </a>
                 </li>
               ))}
             </ul>

@@ -1,6 +1,9 @@
 import { useData } from "../contexts/DataContext";
 import { fmtDate, focusWeek } from "../utils/format";
 import PlanWeek from "../components/PlanWeek";
+import { weekHref } from "../utils/links";
+import { planCsv } from "../utils/csv";
+import BackupButtons from "../components/BackupButtons";
 
 const SHORT_TYPE = { Normal: "", "Step-back": "Step-back", Taper: "Taper", Peak: "Peak", Race: "Race" };
 
@@ -18,12 +21,14 @@ export default function Plan({ arg }) {
           <span className="sub">
             {summary.last_week} weeks · {fmtDate(summary.plan_start, dateOpts)} → {fmtDate(summary.race_date, dateOpts)}
           </span>
+          <span className="spacer" />
+          <BackupButtons kind="plan" exportCsv={() => planCsv(data.plan)} exportTitle="Download the whole plan" />
         </div>
         <nav className="weekpick" aria-label="Pick a week">
           {weeks.map(w => (
             <a
               key={w.week}
-              href={`#/plan/${w.week}`}
+              href={weekHref(w.week)}
               aria-current={w.week === selected ? "true" : undefined}
               className={w.week === summary.current_week ? "now" : ""}
               title={`Week ${w.week} · ${w.week_type}`}

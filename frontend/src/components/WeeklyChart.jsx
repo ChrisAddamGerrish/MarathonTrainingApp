@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { fmtMin } from "../utils/format";
+import { jumpTo, weekHref } from "../utils/links";
 
 const H = 250;
 const M = { l: 34, r: 6, t: 14, b: 28 };
@@ -56,9 +57,7 @@ function Tooltip({ week, left, top, width, started }) {
 export default function WeeklyChart({ weeks, summary, showTable }) {
   const [ref, measured] = useElementWidth();
   const [hover, setHover] = useState(null);
-  const goToWeek = n => {
-    window.location.hash = `#/plan/${n}`;
-  };
+  const goToWeek = n => jumpTo(weekHref(n));
 
   if (showTable) {
     return (
