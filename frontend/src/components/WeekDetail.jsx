@@ -5,6 +5,8 @@ import { useDialogs } from "../contexts/DialogContext";
 import { DAYS, fmtDate, fmtMi, fmtMin, fmtSigned, isRun, pace } from "../utils/format";
 import { useToast } from "../contexts/ToastContext";
 import { Chip, ProgressBar, StatusPill } from "./common";
+import HeartRateZones from "./HeartRateZones";
+import StravaDetails from "./StravaDetails";
 
 const joinParts = parts => parts.filter(Boolean).join(" · ");
 
@@ -172,8 +174,12 @@ function SessionRow({ r, linked, underneath }) {
 function WorkoutRow({ a, indented, countsToward, variance }) {
   const { openEdit } = useDialogs();
   const strava = a.notes?.match(STRAVA_NOTE);
+  const s = a.strava || {};
   const meta = [
     a.distance_mi && isRun(a.category) ? pace(a.distance_mi, a.duration_min) : null,
+    s.elevation_gain_ft ? `+${s.elevation_gain_ft} ft` : null,
+    s.avg_hr ? `${s.avg_hr} bpm` : null,
+    s.trainer && isRun(a.category) ? "treadmill" : null,
     a.notes && !strava ? a.notes : null,
   ].filter(Boolean);
   return (
@@ -218,6 +224,11 @@ function WorkoutRow({ a, indented, countsToward, variance }) {
           Edit
         </button>
       </div>
+      {a.strava && (
+        <div className="c-strava">
+          <StravaDetails activity={a} />
+        </div>
+      )}
     </div>
   );
 }
@@ -273,6 +284,12 @@ export default function WeekDetail({ weekNo }) {
           <ProgressBar actual={wk.sessions_done} planned={wk.sessions_planned} />
         </div>
       </div>
+      {wk.hr_zone_min.some(m => m > 0) && (
+        <div className="wk-zones">
+          <span className="k">Heart-rate zones</span>
+          <HeartRateZones minutes={wk.hr_zone_min} zones={data.hr_zones} />
+        </div>
+      )}
 
       {DAYS.map(day => {
         const dayRows = rows.filter(r => r.day === day);

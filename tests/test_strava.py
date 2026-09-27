@@ -17,7 +17,7 @@ from sqlalchemy import delete, select
 
 from backend.app.core import config
 from backend.app.core.database import engine, init_db
-from backend.app.models.models import ActivityLog, StravaImport, TrainingPlan
+from backend.app.models.models import ActivityLog, ActivityMetrics, AthleteZones, Gear, StravaImport, TrainingPlan
 from backend.app.repository import repository as repo
 from backend.app.services import strava
 
@@ -58,6 +58,8 @@ class WeekTwoCleanup(unittest.TestCase):
         with owner_session() as s:
             s.execute(delete(ActivityLog).where(ActivityLog.activity_date.between(WEEK2[0], WEEK2[-1])))
             s.execute(delete(StravaImport))
+            for table in (ActivityMetrics, Gear, AthleteZones):
+                s.execute(delete(table))
             s.commit()
         config.STRAVA_TOKEN_FILE.unlink(missing_ok=True)
         config.STRAVA_CONFIG_FILE.unlink(missing_ok=True)
@@ -186,10 +188,17 @@ class ImportRuleTests(WeekTwoCleanup):
 
 
 class FakeStrava:
-    """Stands in for strava._request: answers the token and activity-list endpoints."""
+    """Stands in for strava._request: answers the token, activity-list, detailed-activity, stream,
+    athlete and zones endpoints. A detailed activity is the listed one plus `details[id]`; `errors`
+    maps a URL path to the HTTP status to fail it with."""
 
-    def __init__(self, activities=(), fail=None):
+    def __init__(self, activities=(), fail=None, details=None, streams=None, athlete=None, zones=None, errors=None):
         self.activities, self.fail, self.calls = list(activities), fail, []
+        self.details, self.streams = details or {}, streams or {}
+        self.athlete, self.zones, self.errors = athlete or {}, zones or {}, errors or {}
+
+    def paths(self):
+        return [urlparse(url).path for url, _, _ in self.calls]
 
     def __call__(self, url, *, form=None, token=None):
         self.calls.append((url, form, token))
@@ -200,6 +209,20 @@ class FakeStrava:
                     "athlete": {"id": 42, "firstname": "Test", "lastname": "Runner"}}
         if url == strava.DEAUTHORIZE_URL:
             return {}
+        path = urlparse(url).path
+        if path in self.errors:
+            raise strava.StravaError(f"HTTP {self.errors[path]}", self.errors[path])
+        if url == strava.ZONES_URL:
+            return self.zones
+        if url == strava.ATHLETE_URL:
+            return self.athlete
+        if path.startswith("/api/v3/activities/"):
+            parts = path.split("/")
+            strava_id = int(parts[4])
+            if len(parts) > 5:  # /streams
+                return self.streams.get(strava_id, {})
+            listed = next((a for a in self.activities if a["id"] == strava_id), {"id": strava_id})
+            return {**listed, **self.details.get(strava_id, {})}
         query = parse_qs(urlparse(url).query)
         page, size = int(query["page"][0]), int(query["per_page"][0])
         return self.activities[(page - 1) * size: page * size]
@@ -232,7 +255,8 @@ class SyncTests(WeekTwoCleanup):
         with mock.patch.object(strava, "_request", fake):
             counts = strava.sync(owner_tenant())
             again = strava.sync(owner_tenant())
-        self.assertEqual(counts, {"created": 2, "matched": 0, "duplicates": 0, "known": 0, "skipped": 2})  # walk; before start
+        self.assertEqual({k: counts[k] for k in ("created", "matched", "duplicates", "known", "skipped")},
+                         {"created": 2, "matched": 0, "duplicates": 0, "known": 0, "skipped": 2})  # walk; before start
         self.assertEqual(again["known"], 2)
         self.assertEqual(fake.calls[0][2], "access-1")
         status = strava.status(OWNER_ID)
@@ -352,7 +376,7 @@ class ConnectTests(WeekTwoCleanup):
         target = urlparse(response.headers["location"])
         query = {k: v[0] for k, v in parse_qs(target.query).items()}
         self.assertEqual(target.netloc, "www.strava.com")
-        self.assertEqual((query["client_id"], query["scope"]), ("12345", "activity:read_all"))
+        self.assertEqual((query["client_id"], query["scope"]), ("12345", "activity:read_all,profile:read_all"))
         self.assertEqual(query["redirect_uri"], "http://testserver/api/strava/callback")
 
         fake = FakeStrava([strava_activity(50, THU)])
@@ -395,6 +419,153 @@ class ConnectTests(WeekTwoCleanup):
         self.assertFalse(status["connected"])
         with owner_session() as s:
             self.assertEqual(s.scalar(select(ActivityLog.category).where(ActivityLog.activity_date == THU)), "Run")
+
+
+FULL_SCOPE = "activity:read,activity:read_all,profile:read_all"
+ZONES = {"heart_rate": {"zones": [{"min": 0, "max": 120}, {"min": 120, "max": 140}, {"min": 140, "max": 160},
+                                  {"min": 160, "max": 180}, {"min": 180, "max": -1}]}}
+A_RUN = strava_activity(70, THU, average_heartrate=150.4, max_heartrate=171, total_elevation_gain=30.48,
+                        average_cadence=85, trainer=False, gear_id="g1", average_speed=2.98, suffer_score=41,
+                        pr_count=1, map={"summary_polyline": "summary"})
+RUN_DETAILS = {
+    "has_heartrate": True, "description": " Felt good ", "calories": 512.3, "device_name": "Garmin Forerunner",
+    "splits_standard": [{"split": 1, "distance": 1609.3, "moving_time": 540, "elapsed_time": 545,
+                         "elevation_difference": 3.0, "average_heartrate": 148}],
+    "laps": [{"name": "Lap 1", "distance": 8046.7, "moving_time": 2700, "elapsed_time": 2760,
+              "total_elevation_gain": 30.48, "average_heartrate": 150, "max_heartrate": 171}],
+    "best_efforts": [{"name": "1 mile", "distance": 1609, "elapsed_time": 530, "moving_time": 530, "pr_rank": 1},
+                     {"name": "5K", "distance": 5000, "elapsed_time": 1700, "moving_time": 1700, "pr_rank": None}],
+    "map": {"polyline": "full-route", "summary_polyline": "summary"},
+}
+# 1 s in Z1, 1 s in Z2, 2 s in Z3, then a 26 s gap (counted as 10 s) and 1 s in Z5.
+RUN_STREAMS = {"time": {"data": [0, 1, 2, 3, 4, 30]}, "heartrate": {"data": [110, 130, 150, 150, 185, 185]}}
+SHOES = {"shoes": [{"id": "g1", "name": "Pegasus", "primary": True, "distance": 402 * strava.METERS_PER_MILE}],
+         "bikes": [{"id": "b1", "name": "Peloton", "primary": False, "distance": 1000 * strava.METERS_PER_MILE}]}
+
+
+def activity_on(client, day):
+    return next(a for a in client.get("/api/data").json()["activities"] if a["activity_date"] == day.isoformat())
+
+
+class MetricsTests(WeekTwoCleanup):
+    """What else the sync captures: summary metrics, details, heart-rate zones, gear."""
+
+    def sync(self, fake):
+        with mock.patch.object(strava, "_request", fake):
+            return strava.sync(owner_tenant())
+
+    def test_summary_metrics_come_with_the_sync(self):
+        write_settings()
+        write_tokens()
+        self.sync(FakeStrava([A_RUN]))
+        m = activity_on(signed_in_client(), THU)["strava"]
+        self.assertEqual((m["start_time"], m["elapsed_min"], m["elevation_gain_ft"]), ("07:00", 50.0, 100.0))
+        self.assertEqual((m["avg_hr"], m["max_hr"], m["avg_cadence"]), (150.0, 171.0, 170.0))  # steps per minute
+        self.assertEqual((m["avg_speed_mph"], m["suffer_score"], m["pr_count"], m["trainer"], m["gear_id"]),
+                         (6.67, 41.0, 1, False, "g1"))
+
+    def test_details_splits_best_efforts_and_zone_time(self):
+        write_settings()
+        write_tokens(scope=FULL_SCOPE)
+        counts = self.sync(FakeStrava([A_RUN], details={70: RUN_DETAILS}, streams={70: RUN_STREAMS}, zones=ZONES,
+                                      athlete=SHOES))
+        self.assertEqual((counts["details"], counts["details_pending"]), (1, 0))
+        client = signed_in_client()
+        run = activity_on(client, THU)
+        self.assertEqual(run["strava"]["hr_zone_seconds"], [1, 1, 2, 0, 11])
+        details = client.get(f"/api/activities/{run['activity_id']}/strava").json()
+        self.assertEqual((details["description"], details["calories"], details["device_name"], details["gear_name"]),
+                         ("Felt good", 512.0, "Garmin Forerunner", "Pegasus"))
+        self.assertEqual(details["splits"], [{"mile": 1, "distance_mi": 1.0, "moving_s": 540, "elapsed_s": 545,
+                                              "elevation_ft": 10.0, "avg_hr": 148.0}])
+        self.assertEqual(details["laps"][0]["name"], "Lap 1")
+        self.assertEqual(details["polyline"], "full-route")
+        data = client.get("/api/data").json()
+        self.assertEqual([(b["name"], b["elapsed_s"]) for b in data["personal_bests"]], [("1 mile", 530), ("5K", 1700)])
+        self.assertEqual(data["weeks"][1]["hr_zone_min"], [0.0, 0.0, 0.0, 0.0, 0.2])
+        self.assertEqual(len(data["hr_zones"]), 5)
+
+    def test_heart_rate_dropouts_are_not_readings(self):
+        # A strap losing contact reads ~0 bpm: that's not zone 1 time, and drags Strava's average down.
+        self.assertEqual(strava.zone_seconds([0, 1, 2, 3], [0, 0, 130, 150], ZONES["heart_rate"]["zones"]),
+                         [0, 1, 1, 0, 0])
+        self.assertIsNone(strava.summary_metrics({"id": 1, "average_heartrate": 4.2, "max_heartrate": 149})["avg_hr"])
+        self.assertEqual(strava.summary_metrics({"id": 1, "average_heartrate": 131.6})["avg_hr"], 132.0)
+
+    def test_a_later_sync_keeps_the_details(self):
+        write_settings()
+        write_tokens(scope=FULL_SCOPE)
+        fake = FakeStrava([A_RUN], details={70: RUN_DETAILS}, streams={70: RUN_STREAMS}, zones=ZONES)
+        self.sync(fake)
+        self.sync(fake)  # the summary route must not replace the full one
+        client = signed_in_client()
+        details = client.get(f"/api/activities/{activity_on(client, THU)['activity_id']}/strava").json()
+        self.assertEqual((details["polyline"], details["description"]), ("full-route", "Felt good"))
+        self.assertEqual(fake.paths().count("/api/v3/activities/70"), 1)  # details are fetched once
+
+    def test_details_are_fetched_a_few_per_sync_newest_first(self):
+        write_settings()
+        write_tokens()
+        fake = FakeStrava([strava_activity(80, TUE, "Ride"), strava_activity(81, WED, "WeightTraining"),
+                           strava_activity(82, THU)])
+        with mock.patch.object(strava, "DETAIL_BUDGET", 2):
+            first = self.sync(fake)
+            self.assertEqual([p for p in fake.paths() if p.startswith("/api/v3/activities/")],
+                             ["/api/v3/activities/82", "/api/v3/activities/81"])
+            second = self.sync(fake)
+        self.assertEqual((first["details"], first["details_pending"]), (2, 1))
+        self.assertEqual((second["details"], second["details_pending"]), (1, 0))
+
+    def test_rate_limit_while_fetching_details_does_not_fail_the_sync(self):
+        write_settings()
+        write_tokens()
+        counts = self.sync(FakeStrava([A_RUN], errors={"/api/v3/activities/70": 429}))
+        self.assertEqual((counts["created"], counts["details"], counts["details_pending"]), (1, 0, 1))
+        status = signed_in_client().get("/api/strava/status").json()
+        self.assertIn("rate limit", status["details_note"])
+        self.assertEqual(status["details_pending"], 1)
+        self.assertIsNone(status["last_error"])
+
+    def test_an_activity_gone_from_strava_is_not_asked_for_again(self):
+        write_settings()
+        write_tokens()
+        fake = FakeStrava([A_RUN], errors={"/api/v3/activities/70": 404})
+        self.assertEqual(self.sync(fake)["details_pending"], 0)
+        self.sync(fake)
+        self.assertEqual(fake.paths().count("/api/v3/activities/70"), 1)
+
+    def test_without_profile_access_there_are_no_gear_or_zone_calls(self):
+        write_settings()
+        write_tokens()  # a connection from before profile:read_all was asked for
+        fake = FakeStrava([A_RUN], details={70: RUN_DETAILS}, streams={70: RUN_STREAMS})
+        self.sync(fake)
+        self.assertNotIn("/api/v3/athlete", fake.paths())
+        self.assertNotIn("/api/v3/activities/70/streams", fake.paths())  # no zones to sort the heart rate into
+        self.assertFalse(signed_in_client().get("/api/strava/status").json()["profile_access"])
+
+    def test_shoe_mileage_and_when_to_replace(self):
+        write_settings()
+        write_tokens(scope=FULL_SCOPE)
+        self.sync(FakeStrava(athlete=SHOES, zones=ZONES))
+        client = signed_in_client()
+        shoe, bike = client.get("/api/data").json()["gear"]
+        self.assertEqual((shoe["name"], shoe["distance_mi"], shoe["replace_at_mi"], shoe["replace_due"]),
+                         ("Pegasus", 402.0, 400.0, True))
+        self.assertEqual((bike["kind"], bike["replace_at_mi"], bike["replace_due"]), ("bike", None, False))
+        self.assertFalse(client.put("/api/strava/gear/g1", json={"replace_at_mi": 500}).json()["replace_due"])
+        self.assertEqual(client.put("/api/strava/gear/nope", json={"replace_at_mi": 500}).status_code, 404)
+        self.sync(FakeStrava(athlete={"shoes": SHOES["shoes"]}, zones=ZONES))  # the bike left the profile
+        shoe, bike = client.get("/api/data").json()["gear"]
+        self.assertEqual((shoe["replace_at_mi"], bike["retired"]), (500.0, True))
+
+    def test_connecting_again_keeps_the_sync_position_and_adds_access(self):
+        write_settings()
+        write_tokens(sync_start="2026-09-14", newest_start=123)
+        with mock.patch.object(strava, "_request", FakeStrava()):
+            strava.connect(OWNER_ID, "code", FULL_SCOPE, date(2026, 10, 7))
+        state = strava._load_state(OWNER_ID)
+        self.assertEqual((state["sync_start"], state["newest_start"]), ("2026-09-14", 123))
+        self.assertTrue(strava.status(OWNER_ID)["profile_access"])
 
 
 if __name__ == "__main__":

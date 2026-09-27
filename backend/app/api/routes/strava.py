@@ -8,7 +8,11 @@ from typing import Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
-from backend.app.api.deps import UserDep, signed_in_user
+from pydantic import BaseModel, Field
+
+from backend.app.api.deps import SessionDep, UserDep, signed_in_user
+from backend.app.core.database import user_session
+from backend.app.repository import repository as repo
 from backend.app.core.errors import AppError
 from backend.app.services import strava
 
@@ -25,9 +29,22 @@ _pending: dict[str, tuple[float, int]] = {}
 DONE_URL = "/#/log"
 
 
+class GearIn(BaseModel):
+    replace_at_mi: Optional[float] = Field(None, gt=0, le=5000)
+
+
+def _status(user) -> dict:
+    """strava.status plus how many imported workouts still wait for their details."""
+    result = strava.status(user.user_id)
+    if result["connected"]:
+        with user_session(user.tenant) as session:
+            result["details_pending"] = len(repo.activities_needing_details(session))
+    return result
+
+
 @router.get("/status")
 def strava_status(user: UserDep):
-    return strava.status(user.user_id)
+    return _status(user)
 
 
 @router.get("/connect")
@@ -63,7 +80,14 @@ def strava_callback(request: Request, state: str = "", code: Optional[str] = Non
 
 @router.post("/sync")
 def strava_sync(user: UserDep):
-    return {**strava.status(user.user_id), "imported": strava.sync(user.tenant)}
+    imported = strava.sync(user.tenant)
+    return {**_status(user), "imported": imported}
+
+
+@router.put("/gear/{gear_id}")
+def set_gear_replace_at(gear_id: str, body: GearIn, session: SessionDep):
+    """When to flag a pair of shoes as due for replacing (None: never)."""
+    return repo.set_gear_replace_at(session, gear_id, body.replace_at_mi)
 
 
 @router.post("/disconnect")

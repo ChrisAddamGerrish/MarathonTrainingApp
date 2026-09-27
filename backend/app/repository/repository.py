@@ -20,6 +20,9 @@ from backend.app.models.models import (
     ACTIVITY_COLUMNS,
     ActivityHistory,
     ActivityLog,
+    ActivityMetrics,
+    AthleteZones,
+    Gear,
     PlanSkip,
     PlanVsActual,
     PlanWeek,
@@ -227,8 +230,13 @@ def unskip_session(session: Session, plan_id: str) -> dict[str, Any]:
 
 
 def activity_rows(session: Session) -> list[dict[str, Any]]:
-    stmt = select(ActivityLog).order_by(desc(ActivityLog.activity_date), desc(ActivityLog.activity_id))
-    return [_activity(session, a) for a in session.scalars(stmt)]
+    """Every activity, newest first, each with its Strava summary ("strava", None if there's none)."""
+    stmt = (
+        select(ActivityLog, ActivityMetrics)
+        .outerjoin(ActivityMetrics, ActivityMetrics.activity_id == ActivityLog.activity_id)
+        .order_by(desc(ActivityLog.activity_date), desc(ActivityLog.activity_id))
+    )
+    return [{**_activity(session, a), "strava": _metrics_summary(m)} for a, m in session.execute(stmt)]
 
 
 def _get_activity(session: Session, activity_id: int) -> ActivityLog:
@@ -604,3 +612,152 @@ def restore_plan(session: Session, rows: list[dict[str, Any]], apply: bool) -> d
     log.info("Plan restored from a backup: %(added)s added, %(changed)s changed, %(removed)s removed, "
              "%(unlinked)s activities unlinked (database copied to %(backup)s)", result)
     return result
+
+
+# --------------------------------------------------------------------------
+# Strava metrics, zones and gear (services/strava.py fetches them)
+# --------------------------------------------------------------------------
+
+# What each activity carries in activity_rows; the rest (splits, laps, route...) is in activity_details.
+_METRICS_SUMMARY = [
+    "start_time", "elapsed_min", "elevation_gain_ft", "avg_hr", "max_hr", "avg_cadence", "avg_watts",
+    "weighted_avg_watts", "max_watts", "avg_speed_mph", "max_speed_mph", "suffer_score", "pr_count", "trainer",
+    "gear_id", "calories", "hr_zone_seconds",
+]
+_METRICS_DETAIL = _METRICS_SUMMARY + [
+    "strava_id", "description", "device_name", "splits", "laps", "best_efforts", "polyline", "details_fetched_at",
+]
+DEFAULT_SHOE_MILES = 400.0  # a common rule of thumb: running shoes last roughly 300-500 miles
+
+
+def _metric(m: ActivityMetrics, column: str) -> Any:
+    value = getattr(m, column)
+    # Averages stored before dropouts were filtered out (see strava.MIN_REAL_HR) aren't readings.
+    return None if column == "avg_hr" and value is not None and value < 30 else value
+
+
+def _metrics_summary(m: Optional[ActivityMetrics]) -> Optional[dict[str, Any]]:
+    return {c: _metric(m, c) for c in _METRICS_SUMMARY} if m is not None else None
+
+
+def save_metrics(session: Session, activity_id: int, values: dict[str, Any]) -> None:
+    """Store (or update) an activity's Strava metrics. Nothing happens if the activity is gone.
+    A summary (from the activity list) never replaces the full-resolution route of the detailed
+    activity, nor a route with none."""
+    if session.get(ActivityLog, activity_id) is None:
+        return
+    metrics = session.get(ActivityMetrics, activity_id)
+    if metrics is None:
+        session.add(ActivityMetrics(activity_id=activity_id, **values))
+    else:
+        keep_route = values.get("polyline") is None or (
+            metrics.details_fetched_at is not None and "details_fetched_at" not in values)
+        for column, value in values.items():
+            if column == "polyline" and keep_route:
+                continue
+            setattr(metrics, column, value)
+    session.commit()
+
+
+def activities_needing_details(session: Session) -> list[tuple[int, int]]:
+    """(activity id, Strava id) of imported activities without their detailed Strava activity yet,
+    newest first. For a workout recorded twice, the recording its metrics came from wins."""
+    stmt = (
+        select(ActivityLog.activity_id, StravaImport.strava_id, StravaImport.outcome, ActivityMetrics)
+        .join(StravaImport, StravaImport.activity_id == ActivityLog.activity_id)
+        .outerjoin(ActivityMetrics, ActivityMetrics.activity_id == ActivityLog.activity_id)
+        .order_by(desc(ActivityLog.activity_date), desc(ActivityLog.activity_id), StravaImport.strava_id)
+    )
+    chosen: dict[int, int] = {}
+    for activity_id, strava_id, outcome, metrics in session.execute(stmt):
+        if metrics is not None and metrics.details_fetched_at is not None:
+            continue
+        preferred = metrics.strava_id if metrics is not None else None
+        if activity_id not in chosen or strava_id == preferred or (outcome == "created" and preferred is None):
+            chosen[activity_id] = strava_id
+    return list(chosen.items())
+
+
+def activity_details(session: Session, activity_id: int) -> dict[str, Any]:
+    """Everything Strava told us about one activity (404 if it has nothing)."""
+    _get_activity(session, activity_id)
+    metrics = session.get(ActivityMetrics, activity_id)
+    if metrics is None:
+        raise NotFoundError("This activity has no Strava data")
+    gear = session.scalars(select(Gear).where(Gear.gear_id == metrics.gear_id)).first() if metrics.gear_id else None
+    return {"activity_id": activity_id, **{c: _metric(metrics, c) for c in _METRICS_DETAIL},
+            "gear_name": gear.name if gear else None}
+
+
+def personal_bests(session: Session) -> list[dict[str, Any]]:
+    """The fastest time for each of Strava's best-effort distances (1 mile, 5K, half marathon...),
+    across the activities in the log, shortest distance first."""
+    stmt = (
+        select(ActivityLog, ActivityMetrics.best_efforts)
+        .join(ActivityMetrics, ActivityMetrics.activity_id == ActivityLog.activity_id)
+        .where(ActivityMetrics.best_efforts.is_not(None))
+    )
+    best: dict[str, dict[str, Any]] = {}
+    for activity, efforts in session.execute(stmt):
+        for e in efforts or []:
+            if not e.get("name") or not e.get("elapsed_s"):
+                continue
+            if e["name"] not in best or e["elapsed_s"] < best[e["name"]]["elapsed_s"]:
+                best[e["name"]] = {"name": e["name"], "distance_m": e.get("distance_m"), "elapsed_s": e["elapsed_s"],
+                                   "activity_id": activity.activity_id, "date": activity.activity_date.isoformat(),
+                                   "session": activity.actual_session}
+    return sorted(best.values(), key=lambda b: b["distance_m"] or 0)
+
+
+def hr_zones(session: Session) -> Optional[list[dict[str, Any]]]:
+    zones = session.scalars(select(AthleteZones)).first()
+    return zones.heart_rate if zones is not None else None
+
+
+def save_zones(session: Session, heart_rate: Optional[list[Any]], power: Optional[list[Any]]) -> None:
+    zones = session.scalars(select(AthleteZones)).first()
+    if zones is None:
+        session.add(AthleteZones(heart_rate=heart_rate, power=power))
+    else:
+        zones.heart_rate, zones.power = heart_rate, power
+        zones.fetched_at = func.strftime("%Y-%m-%dT%H:%M:%SZ", "now")
+    session.commit()
+
+
+def _gear(g: Gear) -> dict[str, Any]:
+    due = g.kind == "shoe" and g.replace_at_mi and not g.retired and g.distance_mi >= g.replace_at_mi
+    return {"gear_id": g.gear_id, "kind": g.kind, "name": g.name, "distance_mi": g.distance_mi,
+            "is_primary": g.is_primary, "retired": g.retired, "replace_at_mi": g.replace_at_mi, "replace_due": bool(due)}
+
+
+def gear_rows(session: Session) -> list[dict[str, Any]]:
+    """Shoes then bikes; in use before retired, the primary one first, then by distance."""
+    stmt = select(Gear).order_by(desc(Gear.kind == "shoe"), Gear.retired, desc(Gear.is_primary), desc(Gear.distance_mi))
+    return [_gear(g) for g in session.scalars(stmt)]
+
+
+def save_gear(session: Session, items: list[dict[str, Any]]) -> None:
+    """Bring the gear list in line with the athlete's Strava profile. New shoes get the default
+    replacement mileage; one set in the app is kept. Gear no longer listed there counts as retired."""
+    current = {g.gear_id: g for g in session.scalars(select(Gear))}
+    for item in items:
+        gear = current.pop(item["gear_id"], None)
+        if gear is None:
+            session.add(Gear(**item, replace_at_mi=DEFAULT_SHOE_MILES if item["kind"] == "shoe" else None))
+        else:
+            for column, value in item.items():
+                setattr(gear, column, value)
+            gear.updated_at = func.strftime("%Y-%m-%dT%H:%M:%SZ", "now")
+    for gone in current.values():
+        gone.retired = True
+    session.commit()
+
+
+def set_gear_replace_at(session: Session, gear_id: str, miles: Optional[float]) -> dict[str, Any]:
+    gear = session.scalars(select(Gear).where(Gear.gear_id == gear_id)).first()
+    if gear is None:
+        raise NotFoundError(f"Unknown gear '{gear_id}'")
+    gear.replace_at_mi = miles
+    session.commit()
+    log.info("Gear %s (%s): replace at %s mi", gear_id, gear.name, miles)
+    return _gear(gear)

@@ -6,6 +6,7 @@ import { weekHref, workoutHref } from "../utils/links";
 import { Chip } from "../components/common";
 import WeekDetail from "../components/WeekDetail";
 import WeeklyChart from "../components/WeeklyChart";
+import { PersonalBests, Shoes } from "../components/StravaCards";
 
 export default function Dashboard() {
   const { data } = useData();
@@ -105,6 +106,13 @@ export default function Dashboard() {
         </div>
         <WeekDetail weekNo={fw} />
       </div>
+
+      {(data.personal_bests.length > 0 || data.gear.some(g => g.kind === "shoe" && !g.retired)) && (
+        <div className="section strava-cards">
+          {data.personal_bests.length > 0 && <PersonalBests bests={data.personal_bests} />}
+          <Shoes gear={data.gear} />
+        </div>
+      )}
 
       <div className="section">
         <div className="section-head">

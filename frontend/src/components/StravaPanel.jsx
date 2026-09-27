@@ -19,6 +19,7 @@ function describe(result) {
   if (result.created) parts.push(`${plural(result.created, "new workout")} imported`);
   if (result.matched) parts.push(`${result.matched} already logged`);
   if (result.duplicates) parts.push(`${plural(result.duplicates, "duplicate recording")} merged`);
+  if (result.details) parts.push(`details for ${plural(result.details, "workout")}`);
   return parts.length ? parts.join(", ") : "nothing new";
 }
 
@@ -108,8 +109,20 @@ export default function StravaPanel() {
           {" "}
           · {status.last_sync ? `last synced ${ago(status.last_sync)} (${describe(status.last_result)})` : "not synced yet"}
         </span>
+        {status.details_pending > 0 && (
+          <div className="muted small">
+            Splits, heart-rate zones and best efforts: {plural(status.details_pending, "workout")} still to fetch, a few
+            each sync.
+          </div>
+        )}
+        {status.details_note && <div className="form-error">{status.details_note}</div>}
         {status.last_error && <div className="form-error">Last sync failed: {status.last_error}</div>}
       </div>
+      {!status.profile_access && (
+        <a className="btn small" href="/api/strava/connect" title="Strava asks you to allow access to your shoes, bikes and heart-rate zones">
+          Allow shoes &amp; zones
+        </a>
+      )}
       <button className="btn small" onClick={syncNow} disabled={busy}>
         {busy ? "Syncing…" : "Sync now"}
       </button>

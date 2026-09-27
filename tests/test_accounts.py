@@ -241,6 +241,29 @@ class IsolationTests(unittest.TestCase):
         self.assertNotEqual(mine[0]["activity_id"], a["activity_id"])
         self.assertEqual(self.owner.get("/api/data").json(), self.owner_data)
 
+    def test_strava_details_are_theirs_only(self):
+        from tests import owner_session
+        from backend.app.repository import repository as repo
+
+        a = self.owner_data["activities"][0]
+        with owner_session() as s:
+            repo.save_metrics(s, a["activity_id"], {"strava_id": 1, "avg_hr": 150, "description": "private"})
+            repo.save_gear(s, [{"gear_id": "g9", "kind": "shoe", "name": "Mine", "distance_mi": 10.0,
+                                "is_primary": True, "retired": False}])
+        try:
+            self.assertEqual(self.owner.get(f"/api/activities/{a['activity_id']}/strava").json()["description"],
+                             "private")
+            self.assertEqual(self.client.get(f"/api/activities/{a['activity_id']}/strava").status_code, 404)
+            self.assertEqual(self.client.put("/api/strava/gear/g9", json={"replace_at_mi": 1}).status_code, 404)
+            self.assertEqual(self.client.get("/api/data").json()["gear"], [])
+        finally:
+            with owner_session() as s:
+                from sqlalchemy import delete
+                from backend.app.models.models import ActivityMetrics, Gear
+                s.execute(delete(ActivityMetrics))
+                s.execute(delete(Gear))
+                s.commit()
+
     def test_new_workouts_and_their_history_are_theirs(self):
         created = self.client.post("/api/activities", json={"activity_date": "2026-10-06", "category": "Run",
                                                             "actual_session": "Mine"}).json()

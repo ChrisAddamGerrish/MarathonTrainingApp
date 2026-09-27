@@ -4,6 +4,7 @@ import { useData } from "../contexts/DataContext";
 import { DetailRows, DiffRows, diffActivity } from "../utils/diff";
 import { CATEGORIES } from "../utils/format";
 import { planLinkWarnings } from "../utils/planLink";
+import StravaDetails from "./StravaDetails";
 
 const str = v => (v == null ? "" : String(v));
 const toNumber = s => (s === "" || s == null ? null : Number(s));
@@ -275,6 +276,7 @@ export default function ActivityDialog({ session, onClose, onFinish }) {
             <span>Notes</span>
             <textarea rows={2} {...bind("notes")} />
           </label>
+          {isEdit && original.strava && <StravaDetails activity={original} />}
           <div className="form-error" role="alert">
             {formError}
           </div>

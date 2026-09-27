@@ -22,6 +22,11 @@
   --bad:     #c93a39;
   --shadow: 0 1px 2px rgba(20,20,10,.05), 0 4px 16px rgba(20,20,10,.04);
 }
+/* Heart-rate zones, easy to hard. */
+:root { --z1: #9fb3c8; --z2: #2a78d6; --z3: #2e9e5b; --z4: #e08a1e; --z5: #c93a39; }
+@media (prefers-color-scheme: dark) {
+  :root { --z1: #6d7f93; --z2: #3987e5; --z3: #3fb970; --z4: #f0a040; --z5: #e66767; }
+}
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
@@ -159,6 +164,11 @@ a.btn { color: inherit; text-decoration: none; }
    Only the name column moves, so the numbers stay lined up with the other rows. */
 .sess.linked { border-top: 0; padding-top: 0; }
 .sess.linked > .c-name { margin-left: 8px; padding-left: 14px; border-left: 2px solid var(--line); }
+.sess .c-strava { grid-column: 1 / -1; }
+.sess.linked > .c-strava { margin-left: 8px; padding-left: 14px; border-left: 2px solid var(--line); }
+.c-strava .strava-details { padding: 6px 12px; border-radius: 10px; }
+.c-strava .strava-details summary { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.c-strava .strava-details[open] { padding-bottom: 12px; }
 .extra-tag { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; color: var(--muted); border: 1px dashed var(--line); padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: 1px; }
 
 /* ---------- Week picker ---------- */
@@ -218,6 +228,41 @@ table.data tr.clickable:hover td { background: var(--surface-2); }
 
 /* ---------- Recent list ---------- */
 .recent { list-style: none; margin: 0; padding: 0; }
+
+/* ---------- Strava extras ---------- */
+.small { font-size: 12px; }
+.zones { display: grid; gap: 6px; }
+.zone-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--surface-2); }
+.zone-bar span { display: block; height: 100%; }
+.zone-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
+.zone-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+.wk-zones { display: grid; gap: 6px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.wk-zones .k { font-size: 13px; color: var(--ink-2); }
+.strava-details { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; display: grid; gap: 12px; }
+.strava-details[open] { gap: 14px; }
+.strava-details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 16px; margin: 0; }
+.stat-grid dt { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.stat-grid dd { margin: 2px 0 0; font-size: 14px; }
+.strava-description { margin: 0; white-space: pre-wrap; color: var(--ink-2); }
+.route { width: 100%; max-width: 240px; height: auto; background: var(--surface-2); border-radius: 10px; }
+.route path { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+table.data.compact th, table.data.compact td { padding: 5px 8px; }
+table.data caption { text-align: left; font-weight: 600; font-size: 13px; padding-bottom: 4px; }
+.efforts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.efforts .caption { width: 100%; font-weight: 600; font-size: 13px; }
+.effort { font-size: 12px; padding: 3px 8px; border-radius: 999px; background: var(--surface-2); }
+.effort.pr { outline: 1px solid var(--good); }
+.strava-link { font-size: 13px; }
+.strava-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.strava-card { padding: 16px 20px; display: grid; gap: 10px; align-content: start; }
+.strava-card h3 { font-size: 15px; }
+.shoes { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.shoe-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.shoe-head .spacer { flex: 1; }
+.shoe-limit { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.shoe-limit input { width: 72px; padding: 3px 6px; }
+.extra-tag.warn { color: var(--bad); border-color: var(--bad); }
 .recent li { border-top: 1px solid var(--line); }
 .recent li:first-child { border-top: 0; }
 .restore-summary { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
@@ -331,7 +376,7 @@ dialog form[hidden] { display: none; }
   .sess .c-act { grid-column: 1 / -1; justify-content: flex-start; }
   /* Rows stack here, so indent the whole row instead of the name column. */
   .sess.linked { margin-left: 8px; padding-left: 14px; border-left: 2px solid var(--line); }
-  .sess.linked > .c-name { margin-left: 0; padding-left: 0; border-left: 0; }
+  .sess.linked > .c-name, .sess.linked > .c-strava { margin-left: 0; padding-left: 0; border-left: 0; }
   .wk-summary { grid-template-columns: 1fr; gap: 14px; }
 }
 @media (max-width: 600px) {

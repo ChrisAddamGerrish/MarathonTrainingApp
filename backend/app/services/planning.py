@@ -64,6 +64,8 @@ def build_weeks(plan_weeks: list[dict], plan: list[dict], activities: list[dict]
             "actual_min": 0.0,
             "sessions_planned": 0,
             "sessions_done": 0,
+            # Minutes in each heart-rate zone (Z1..Z5), from workouts whose Strava heart-rate data was read.
+            "hr_zone_min": [],
         }
         for pw in plan_weeks
     }
@@ -85,10 +87,16 @@ def build_weeks(plan_weeks: list[dict], plan: list[dict], activities: list[dict]
         elif a["category"] == "Bike":
             w["actual_bike_mi"] += a["distance_mi"] or 0
         w["actual_min"] += a["duration_min"] or 0
+        zones = (a.get("strava") or {}).get("hr_zone_seconds") or []
+        if len(w["hr_zone_min"]) < len(zones):
+            w["hr_zone_min"] += [0.0] * (len(zones) - len(w["hr_zone_min"]))
+        for n, seconds in enumerate(zones):
+            w["hr_zone_min"][n] += seconds / 60
     result = [weeks[k] for k in sorted(weeks)]
     for w in result:
         for key in ("planned_run_mi", "actual_run_mi", "actual_bike_mi", "planned_min", "actual_min"):
             w[key] = round(w[key], 2)
+        w["hr_zone_min"] = [round(m, 1) for m in w["hr_zone_min"]]
     return result
 
 
