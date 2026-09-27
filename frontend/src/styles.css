@@ -214,6 +214,10 @@ table.data td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertica
 table.data tr:last-child td { border-bottom: 0; }
 table.data td.r, table.data th.r { text-align: right; white-space: nowrap; }
 table.data tr.clickable { cursor: pointer; }
+/* A column header that changes the order: looks like the other headers, reads as a button. */
+table.data th .th-sort { all: unset; cursor: pointer; }
+table.data th .th-sort:hover { color: var(--ink); }
+table.data th .th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 table.data tr.clickable:hover td { background: var(--surface-2); }
 .table-scroll { overflow-x: auto; }
 .muted { color: var(--muted); }

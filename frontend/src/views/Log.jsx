@@ -27,17 +27,20 @@ export default function Log({ arg, filters, setFilters }) {
   }, [arg, activities, openEdit, toast]);
 
   const q = filters.q.trim().toLowerCase();
-  const list = activities.filter(
+  const matching = activities.filter(
     a =>
       (!filters.category || a.category === filters.category) &&
       (!filters.week || String(a.week) === filters.week) &&
       (!q || `${a.actual_session} ${a.notes || ""}`.toLowerCase().includes(q)),
   );
+  // The server sends them newest first (by date, then by when they were logged).
+  const list = filters.oldestFirst ? [...matching].reverse() : matching;
   const totals = list.reduce(
     (t, a) => ({ mi: t.mi + (isRun(a.category) ? a.distance_mi || 0 : 0), min: t.min + (a.duration_min || 0) }),
     { mi: 0, min: 0 },
   );
   const setFilter = key => e => setFilters(f => ({ ...f, [key]: e.target.value }));
+  const toggleDateOrder = () => setFilters(f => ({ ...f, oldestFirst: !f.oldestFirst }));
 
   return (
     <div className="section" style={{ marginTop: 4 }}>
@@ -90,7 +93,16 @@ export default function Log({ arg, filters, setFilters }) {
             <table className="data">
               <thead>
                 <tr>
-                  <th>Date</th>
+                  <th aria-sort={filters.oldestFirst ? "ascending" : "descending"}>
+                    <button
+                      type="button"
+                      className="th-sort"
+                      onClick={toggleDateOrder}
+                      title={filters.oldestFirst ? "Oldest first: click for newest first" : "Newest first: click for oldest first"}
+                    >
+                      Date <span aria-hidden="true">{filters.oldestFirst ? "▲" : "▼"}</span>
+                    </button>
+                  </th>
                   <th>Category</th>
                   <th>Session</th>
                   <th className="r">Distance</th>
