@@ -74,6 +74,10 @@ docker compose up -d --build                    # the app, on http://localhost:8
 docker compose exec app python -m backend.cli   # create the first admin account
 ```
 
+The CLI asks a new account for its plan's start date (the Monday of week 1). When you'll import a
+plan backup, give the same Monday as the old install: the plan stores weeks and weekdays, and the
+dates follow from that.
+
 **Settings** (all optional and git-ignored):
 
 - `.env` (copy `.env.example`): `TZ`, which makes the plan's "today" your today (the default is
@@ -81,7 +85,11 @@ docker compose exec app python -m backend.cli   # create the first admin account
 - `strava.env` is passed to the container as environment variables, so the same file works for
   Docker and `start.ps1`. Restart the container after changing it: `docker compose up -d`.
 
-**Reaching it from other devices:** add the Caddy proxy. It uses `deploy/Caddyfile` and
+**On your home network without a proxy** (e.g. a home lab machine), set `MARATHON_BIND=0.0.0.0` and
+`FORWARDED_ALLOW_IPS=127.0.0.1` in `.env`, then open `http://<machine's IP>:8000`. This is plain
+HTTP, so keep it to a network you trust.
+
+**Reaching it from other devices with HTTPS:** add the Caddy proxy. It uses `deploy/Caddyfile` and
 `deploy/caddy.env`, the same as `start.ps1`, and publishes ports 80, 443 and 8080.
 
 ```powershell

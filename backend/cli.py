@@ -1,7 +1,8 @@
 """Managing sign-in from the command line (the web app has no page for the first admin account).
 
     .venv\\Scripts\\python.exe -m backend.cli           set a user's password (a user that
-                                                     doesn't exist yet is created, as an admin)
+                                                     doesn't exist yet is created, as an admin,
+                                                     and asked for their plan's start date)
     .venv\\Scripts\\python.exe -m backend.cli invite    print a new invite code
     .venv\\Scripts\\python.exe -m backend.cli check     exit code 0 if anyone can sign in
 
@@ -30,10 +31,32 @@ def _set_password() -> int:
         print("The passwords did not match.", file=sys.stderr)
         return 1
     today = date.today()
-    created = accounts.set_password(user, password, plan_start=today - timedelta(days=today.weekday()))
+    plan_start = today - timedelta(days=today.weekday())
+    with SessionLocal() as session:
+        is_new = accounts.find_user(session, user) is None
+    if is_new:  # an existing account keeps its plan; only a new one needs week 1's Monday
+        plan_start = _ask_plan_start(plan_start)
+        if plan_start is None:
+            return 1
+    created = accounts.set_password(user, password, plan_start=plan_start)
     print(f"{'Admin account created' if created else 'Password changed'} for {user}. "
           "Its existing sessions are signed out.")
     return 0
+
+
+def _ask_plan_start(default: date) -> date | None:
+    """Week 1's Monday for a new account. Match the old one when importing a plan backup: the plan
+    stores week and weekday, and the dates follow from this."""
+    answer = input(f"Plan start, the Monday of week 1 (YYYY-MM-DD) [{default.isoformat()}]: ").strip()
+    try:
+        start = date.fromisoformat(answer) if answer else default
+    except ValueError:
+        print("That isn't a date like 2026-09-14.", file=sys.stderr)
+        return None
+    if start.weekday() != 0:
+        print(f"{start.isoformat()} is a {start:%A}; the plan starts on a Monday.", file=sys.stderr)
+        return None
+    return start
 
 
 def _invite() -> int:
