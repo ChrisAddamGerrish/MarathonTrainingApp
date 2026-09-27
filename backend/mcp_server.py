@@ -18,7 +18,7 @@ be reverted from there like any other change.
 stdout is the protocol channel: never print() in this module (log to stderr instead).
 
 Logging: every tool call is logged (name, arguments, outcome, duration), and so are the data changes
-the repository makes. Records go to stderr, which most clients discard, and to logs/mcp_server.log
+the repository makes. Records go to stderr, which most clients discard, and to data/logs/mcp_server.log
 (see core/logging_config.py; $MARATHON_LOG_DIR and $MARATHON_LOG_LEVEL change where and how much).
 """
 import functools
@@ -39,9 +39,9 @@ from backend.app.core import config
 from backend.app.core.database import SessionLocal, Tenant, tenant_of, user_session, init_db
 from backend.app.core.errors import AppError
 from backend.app.core.logging_config import setup_logging
-from backend.app.models.models import ACTIVITY_COLUMNS, User
-from backend.app.repository import repository as repo
-from backend.app.schemas.schemas import ActivityIn, Category
+from backend.app.models import ACTIVITY_COLUMNS, User
+from backend.app import repository as repo
+from backend.app.schemas import ActivityIn, Category
 from backend.app.services import planning
 
 mcp = MCPServer(

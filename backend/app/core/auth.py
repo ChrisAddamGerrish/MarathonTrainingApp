@@ -3,28 +3,17 @@
 Accounts live in the users table (models.User); new people register with an invite code an admin
 hands out (services/accounts.py). config.AUTH_FILE (auth.env, git-ignored) now only holds
 MARATHON_SECRET_KEY, which signs session cookies. (Its old MARATHON_USER / MARATHON_PASSWORD_HASH
-lines became user 1 when the database was migrated; database.migrate_to_multi_user.)
+lines became user 1 when the database was migrated; migrations.migrate_to_multi_user.)
 
-From the command line:
-
-    .venv\\Scripts\\python.exe -m backend.app.core.auth           set a user's password (a user that
-                                                               doesn't exist yet is created, as an admin)
-    .venv\\Scripts\\python.exe -m backend.app.core.auth invite    print a new invite code
-    .venv\\Scripts\\python.exe -m backend.app.core.auth check     exit code 0 if anyone can sign in
-
-start.ps1 runs the first on first start and with -ResetLogin. A new password signs out every
-existing session of that user.
+Passwords are set and invites made from the command line: see backend/cli.py.
 """
 import base64
-import getpass
 import hashlib
 import hmac
 import json
 import re
 import secrets
-import sys
 import time
-from datetime import date, timedelta
 from typing import Optional
 
 from backend.app.core import config
@@ -132,66 +121,3 @@ def read_session(token: Optional[str], password_hash_of) -> Optional[int]:
     if not stored or not hmac.compare_digest(signature, _signature(payload, stored)):
         return None
     return user_id if data.get("exp", 0) >= time.time() else None
-
-
-# --------------------------------------------------------------------------
-# Command line
-# --------------------------------------------------------------------------
-
-
-def _set_password() -> int:
-    from backend.app.core.database import init_db
-    from backend.app.services import accounts
-
-    init_db()
-    user = input("Username: ").strip()
-    if not USERNAME_PATTERN.match(user):
-        print("The username may only contain letters, digits, dot, dash and underscore.", file=sys.stderr)
-        return 1
-    password = getpass.getpass(f"Password ({MIN_PASSWORD_LENGTH}+ characters): ")
-    if len(password) < MIN_PASSWORD_LENGTH:
-        print(f"The password must be at least {MIN_PASSWORD_LENGTH} characters.", file=sys.stderr)
-        return 1
-    if getpass.getpass("Password again: ") != password:
-        print("The passwords did not match.", file=sys.stderr)
-        return 1
-    today = date.today()
-    created = accounts.set_password(user, password, plan_start=today - timedelta(days=today.weekday()))
-    print(f"{'Admin account created' if created else 'Password changed'} for {user}. "
-          "Its existing sessions are signed out.")
-    return 0
-
-
-def _invite() -> int:
-    from backend.app.core.database import init_db
-    from backend.app.services import accounts
-
-    init_db()
-    code, expires = accounts.create_invite(created_by=None)
-    print(f"Invite code: {code}  (single use, expires {expires[:10]})")
-    return 0
-
-
-def _check() -> int:
-    from backend.app.core.database import SessionLocal, init_db
-    from backend.app.services import accounts
-
-    init_db()
-    with SessionLocal() as session:
-        return 0 if accounts.any_can_sign_in(session) else 1
-
-
-def main(argv: list[str]) -> int:
-    secret_key()
-    if argv[1:] == ["invite"]:
-        return _invite()
-    if argv[1:] == ["check"]:
-        return _check()
-    if argv[1:]:
-        print(__doc__, file=sys.stderr)
-        return 2
-    return _set_password()
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))

@@ -21,6 +21,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Table,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -145,6 +146,29 @@ class PlanVsActual(Owned, Base):
     distance_variance_mi: Mapped[float]
     duration_variance_min: Mapped[float]
     linked_activity_count: Mapped[int]
+
+
+# The view PlanVsActual maps (created by database.init_db).
+PLAN_VS_ACTUAL_VIEW = """CREATE VIEW IF NOT EXISTS plan_vs_actual AS
+SELECT
+    p.user_id,
+    p.plan_id,
+    p.week,
+    p.day,
+    p.category                     AS planned_category,
+    p.run_subtype,
+    p.planned_session,
+    p.target_distance_mi,
+    p.target_duration_min,
+    COALESCE(SUM(a.distance_mi), 0)   AS actual_distance_mi,
+    COALESCE(SUM(a.duration_min), 0)  AS actual_duration_min,
+    COALESCE(SUM(a.distance_mi), 0) - COALESCE(p.target_distance_mi, 0)  AS distance_variance_mi,
+    COALESCE(SUM(a.duration_min), 0) - COALESCE(p.target_duration_min, 0) AS duration_variance_min,
+    COUNT(a.activity_id)              AS linked_activity_count,
+    CASE WHEN COUNT(a.activity_id) = 0 THEN 1 ELSE 0 END AS not_yet_done
+FROM training_plan p
+LEFT JOIN activity_log a ON a.user_id = p.user_id AND a.plan_id = p.plan_id
+GROUP BY p.user_id, p.plan_id"""
 
 
 class ActivityLog(Owned, Base):
@@ -309,3 +333,8 @@ class AthleteZones(Owned, Base):
     heart_rate: Mapped[Optional[list[Any]]] = mapped_column(JSON(none_as_null=True))
     power: Mapped[Optional[list[Any]]] = mapped_column(JSON(none_as_null=True))
     fetched_at: Mapped[str] = mapped_column(String, server_default=_UTC_NOW)
+
+
+# Every table the models describe, in dependency order: all but plan_vs_actual, which is a view
+# (PLAN_VS_ACTUAL_VIEW).
+TABLES: list[Table] = [t for t in Base.metadata.sorted_tables if t is not PlanVsActual.__table__]

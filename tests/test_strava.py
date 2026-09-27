@@ -17,8 +17,8 @@ from sqlalchemy import delete, select
 
 from backend.app.core import config
 from backend.app.core.database import engine, init_db
-from backend.app.models.models import ActivityLog, ActivityMetrics, AthleteZones, Gear, StravaImport, TrainingPlan
-from backend.app.repository import repository as repo
+from backend.app.models import ActivityLog, ActivityMetrics, AthleteZones, Gear, StravaImport, TrainingPlan
+from backend.app import repository as repo
 from backend.app.services import strava
 
 # Week 2 of the plan: Tue has a bike session and an optional run, Wed two strength sessions,

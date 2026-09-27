@@ -7,7 +7,6 @@ __pycache__/
 .idea/
 
 # Project exclude paths
-/logs/
 /frontend/dist/
 /frontend/node_modules/
 /frontend/node_modules/@vitejs/plugin-react/LICENSE
@@ -18,15 +17,18 @@ __pycache__/
 /frontend/node_modules/react-dom/README.md
 /frontend/node_modules/vite/LICENSE.md
 /frontend/node_modules/vite/README.md
-# Caddy reverse proxy settings (see caddy.env.example)
-/caddy.env
+# Caddy reverse proxy settings (see deploy/caddy.env.example)
+/deploy/caddy.env
 # Web app login (see backend/app/core/auth.py)
 /auth.env
-# Strava API app settings and tokens (see backend/app/services/strava.py)
+# Strava API app settings (see backend/app/services/strava.py)
 /strava.env
-/strava_tokens.json
-# Copies the app makes before changing the database's structure
-/backups/
-
-# The database: training data and accounts of everyone using the app (not for a public repo)
+# What the app writes as it runs: the database (training data and accounts of everyone using the
+# app), its backups, Strava tokens and logs. See backend/app/core/config.py.
+/data/
+# Where those lived before data/ (and files still there until they're moved)
 /marathon.db
+/strava_tokens.json
+/backups/
+/logs/
+/caddy.env

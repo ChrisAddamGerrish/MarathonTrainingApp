@@ -15,7 +15,7 @@ from backend.app.api.routes import auth as auth_routes
 from backend.app.core import auth
 from backend.app.core.database import SessionLocal, init_db
 from backend.app.main import app
-from backend.app.models.models import User
+from backend.app.models import User
 from backend.app.services import accounts
 
 

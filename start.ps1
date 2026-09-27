@@ -10,9 +10,9 @@
      password and creates that admin account). The app shows its own sign-in page; admins
      invite everyone else from there.
   4. Runs the FastAPI server, waits until it answers, then opens the browser.
-  5. Runs the Caddy reverse proxy (see Caddyfile) so the app can be reached from other
+  5. Runs the Caddy reverse proxy (see deploy/Caddyfile) so the app can be reached from other
      devices. Caddy is installed with winget if it is missing, and the first run asks where
-     to listen (saved to caddy.env).
+     to listen (saved to deploy/caddy.env).
   Press Ctrl+C in this window to stop it.
 
   Written for Windows PowerShell 5.1 and PowerShell 7. Double-click start.bat if scripts
@@ -70,8 +70,8 @@ try {
     $DistIndex = Join-Path $Frontend 'dist\index.html'
     $Python = Join-Path $Root '.venv\Scripts\python.exe'
     $Url = "http://localhost:$Port"
-    $CaddyFile = Join-Path $Root 'Caddyfile'
-    $CaddyEnv = Join-Path $Root 'caddy.env'
+    $CaddyFile = Join-Path $Root 'deploy\Caddyfile'
+    $CaddyEnv = Join-Path $Root 'deploy\caddy.env'
 
     function Write-Step($message) { Write-Host "==> $message" -ForegroundColor Cyan }
 
@@ -141,7 +141,7 @@ try {
         }
 
         if (-not (Test-Path -LiteralPath $CaddyEnv)) {
-            Write-Step 'Setting up the Caddy proxy (saved to caddy.env)'
+            Write-Step 'Setting up the Caddy proxy (saved to deploy\caddy.env)'
             $site = Read-Host 'Domain name for HTTPS (leave blank to serve plain HTTP on port 8080)'
             if (-not $site) { $site = ':8080' }
             # Let's Encrypt only issues for real public domains; home-network names need Caddy's own CA.
@@ -192,9 +192,9 @@ try {
     }
 
     # --- Web app login -----------------------------------------------------------------------
-    # Accounts live in the database (see backend/app/core/auth.py); `auth check` also brings the
+    # Accounts live in the database (see backend/cli.py); `backend.cli check` also brings the
     # database up to date, so an older single-user database is migrated here, after a backup.
-    & $Python -m backend.app.core.auth check
+    & $Python -m backend.cli check
     $hasLogin = $LASTEXITCODE -eq 0
     if ($ResetLogin -or -not $hasLogin) {
         if ($hasLogin) {
@@ -202,7 +202,7 @@ try {
         } else {
             Write-Step 'Setting up the first account (an admin)'
         }
-        Invoke-Native 'Saving the login' { & $Python -m backend.app.core.auth }
+        Invoke-Native 'Saving the login' { & $Python -m backend.cli }
     }
 
     # --- Already running? ----------------------------------------------------------------

@@ -15,8 +15,8 @@ from fastapi.testclient import TestClient
 from backend.app.core import config, logging_config
 from backend.app.core.database import engine, init_db
 from backend.app.main import app
-from backend.app.repository import repository as repo
-from backend.app.schemas.schemas import ActivityIn
+from backend.app import repository as repo
+from backend.app.schemas import ActivityIn
 
 
 def setUpModule():

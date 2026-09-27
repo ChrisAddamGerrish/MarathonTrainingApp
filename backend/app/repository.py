@@ -14,9 +14,10 @@ from sqlalchemy import delete, desc, func, insert, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.app.core.database import backup_database, tenant_of
+from backend.app.core.database import tenant_of
+from backend.app.core.migrations import backup_database
 from backend.app.core.errors import ConflictError, NotFoundError, UnprocessableError
-from backend.app.models.models import (
+from backend.app.models import (
     ACTIVITY_COLUMNS,
     ActivityHistory,
     ActivityLog,
@@ -567,7 +568,7 @@ def restore_plan(session: Session, rows: list[dict[str, Any]], apply: bool) -> d
 
     Logged activities that count toward a session the backup doesn't have are unlinked, which the
     history records. Plan edits have no history of their own, so the database is copied to
-    backups/ first. With apply=False nothing is written: the counts say what would happen.
+    data/backups/ first. With apply=False nothing is written: the counts say what would happen.
     """
     current = {p.plan_id: p for p in session.scalars(select(TrainingPlan))}
     skips = {s.plan_id: s.reason for s in session.scalars(select(PlanSkip))}

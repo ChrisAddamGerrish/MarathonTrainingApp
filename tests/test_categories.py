@@ -7,7 +7,7 @@ import unittest
 
 from tests import TMP
 
-from backend.app.core.database import allow_activity_categories
+from backend.app.core.migrations import allow_activity_categories
 
 # activity_log, training_plan and the view as they were before Stretch existed (trimmed columns).
 OLD_SCHEMA = """

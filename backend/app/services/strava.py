@@ -45,8 +45,8 @@ from sqlalchemy.orm import Session
 from backend.app.core import config
 from backend.app.core.database import Tenant, user_session
 from backend.app.core.errors import AppError, ConflictError
-from backend.app.repository import repository as repo
-from backend.app.schemas.schemas import ActivityIn
+from backend.app import repository as repo
+from backend.app.schemas import ActivityIn
 from backend.app.services.planning import RUN_CATEGORIES
 
 log = logging.getLogger("marathon.strava")

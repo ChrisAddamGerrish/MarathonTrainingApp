@@ -3,7 +3,7 @@ from sqlalchemy import Connection, func, insert, literal_column, or_
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.sql import ClauseElement
 
-from backend.app.models.models import ACTIVITY_COLUMNS, ActivityHistory, ActivityLog
+from backend.app.models import ACTIVITY_COLUMNS, ActivityHistory, ActivityLog
 
 _HISTORY = ActivityHistory.__table__
 _SOURCE = ActivityLog.__tablename__

@@ -2,8 +2,8 @@
 from fastapi import APIRouter
 
 from backend.app.api.deps import SessionDep
-from backend.app.repository.repository import activity_details, create_activity, delete_activity, update_activity
-from backend.app.schemas.schemas import ActivityIn
+from backend.app.repository import activity_details, create_activity, delete_activity, update_activity
+from backend.app.schemas import ActivityIn
 
 router = APIRouter(prefix="/activities", tags=["activities"])
 
