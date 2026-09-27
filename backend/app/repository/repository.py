@@ -29,6 +29,7 @@ from backend.app.models.models import (
     StravaImport,
     TrainingPlan,
 )
+from backend.app.services import planning
 from backend.app.services.planning import DAYS, RUN_CATEGORIES, week_of
 
 log = logging.getLogger("marathon.repo")
@@ -237,6 +238,15 @@ def activity_rows(session: Session) -> list[dict[str, Any]]:
         .order_by(desc(ActivityLog.activity_date), desc(ActivityLog.activity_id))
     )
     return [{**_activity(session, a), "strava": _metrics_summary(m)} for a, m in session.execute(stmt)]
+
+
+def training_overview(session: Session, today: date) -> tuple[list[dict], list[dict], list[dict]]:
+    """(plan, activities, weeks): the plan with dates and statuses, every activity, and weekly totals."""
+    start = tenant_of(session).plan_start
+    plan = planning.build_plan(plan_rows(session), today, start)
+    activities = activity_rows(session)
+    weeks = planning.build_weeks(plan_week_rows(session), plan, activities, start)
+    return plan, activities, weeks
 
 
 def _get_activity(session: Session, activity_id: int) -> ActivityLog:

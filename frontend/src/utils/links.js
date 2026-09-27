@@ -9,5 +9,3 @@ export const workoutHref = activity => `#/log/${typeof activity === "object" ? a
 export function jumpTo(href) {
   window.location.hash = href;
 }
-
-export const jumpToWorkout = activity => jumpTo(workoutHref(activity));

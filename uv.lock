@@ -305,19 +305,25 @@ source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "mcp" },
-    { name = "pyrefly" },
     { name = "sqlalchemy" },
     { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pyrefly" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "mcp", specifier = ">=2.2" },
-    { name = "pyrefly", specifier = ">=0.60.0" },
     { name = "sqlalchemy", specifier = ">=2.0" },
     { name = "uvicorn", specifier = ">=0.53.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pyrefly", specifier = ">=0.60.0" }]
 
 [[package]]
 name = "mcp"
