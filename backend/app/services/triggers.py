@@ -35,20 +35,22 @@ def _history_triggers() -> list[str]:
     return [
         _create_trigger(
             "activity_log_history_insert", "INSERT",
-            insert(_HISTORY).values(action="INSERT", activity_id=literal_column("NEW.activity_id"), new_values=_row("NEW")),
+            insert(_HISTORY).values(action="INSERT", user_id=literal_column("NEW.user_id"),
+                                     activity_id=literal_column("NEW.activity_id"), new_values=_row("NEW")),
         ),
         # Only when something actually changed, so saving identical values adds no noise.
         _create_trigger(
             "activity_log_history_update", "UPDATE",
             insert(_HISTORY).values(
-                action="UPDATE", activity_id=literal_column("NEW.activity_id"),
+                action="UPDATE", user_id=literal_column("NEW.user_id"), activity_id=literal_column("NEW.activity_id"),
                 old_values=_row("OLD"), new_values=_row("NEW"),
             ),
             when=changed,
         ),
         _create_trigger(
             "activity_log_history_delete", "DELETE",
-            insert(_HISTORY).values(action="DELETE", activity_id=literal_column("OLD.activity_id"), old_values=_row("OLD")),
+            insert(_HISTORY).values(action="DELETE", user_id=literal_column("OLD.user_id"),
+                                     activity_id=literal_column("OLD.activity_id"), old_values=_row("OLD")),
         ),
     ]
 

@@ -35,3 +35,9 @@ class TooManyAttemptsError(AppError):
 
 class NotConfiguredError(AppError):
     status_code = 503
+
+
+class ForbiddenError(AppError):
+    """Signed in, but not allowed (not an admin, or the account's setup isn't finished)."""
+
+    status_code = 403

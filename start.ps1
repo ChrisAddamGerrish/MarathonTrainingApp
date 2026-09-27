@@ -6,8 +6,9 @@
   1. Makes sure the Python environment (.venv) exists and has the app's dependencies.
   2. Makes sure the React front end is built (installs npm packages / rebuilds when the
      source is newer than the last build).
-  3. Makes sure the web app has a login (the first run asks for a username and password,
-     saved to auth.env as a hash). The app shows its own sign-in page.
+  3. Makes sure someone can sign in to the web app (the first run asks for a username and
+     password and creates that admin account). The app shows its own sign-in page; admins
+     invite everyone else from there.
   4. Runs the FastAPI server, waits until it answers, then opens the browser.
   5. Runs the Caddy reverse proxy (see Caddyfile) so the app can be reached from other
      devices. Caddy is installed with winget if it is missing, and the first run asks where
@@ -34,8 +35,8 @@
   Don't start the Caddy proxy; the app is only reachable from this PC.
 
 .PARAMETER ResetLogin
-  Ask for a new username and password for the app's sign-in page. Works while the app is
-  running, and signs out every device.
+  Ask for a username and a new password: changes that user's password (signing out their
+  devices), or creates them as an admin if there's no such user. Works while the app is running.
 
 .EXAMPLE
   .\start.ps1
@@ -191,15 +192,15 @@ try {
     }
 
     # --- Web app login -----------------------------------------------------------------------
-    # auth.env holds the sign-in page's login (see backend/app/core/auth.py). The app re-reads it
-    # when it changes, so a reset applies straight away, even while the app is running.
-    $AuthFile = Join-Path $Root 'auth.env'
-    $hasLogin = (Test-Path -LiteralPath $AuthFile) -and [bool]((Get-Content -LiteralPath $AuthFile) -match '^MARATHON_PASSWORD_HASH=.')
+    # Accounts live in the database (see backend/app/core/auth.py); `auth check` also brings the
+    # database up to date, so an older single-user database is migrated here, after a backup.
+    & $Python -m backend.app.core.auth check
+    $hasLogin = $LASTEXITCODE -eq 0
     if ($ResetLogin -or -not $hasLogin) {
         if ($hasLogin) {
-            Write-Step 'Changing the sign-in login (auth.env)'
+            Write-Step 'Changing a password (or adding an admin)'
         } else {
-            Write-Step 'Setting up the sign-in login (saved to auth.env)'
+            Write-Step 'Setting up the first account (an admin)'
         }
         Invoke-Native 'Saving the login' { & $Python -m backend.app.core.auth }
     }

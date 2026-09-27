@@ -1,6 +1,9 @@
 /** Fired on window when the server says the session is gone, so the app can show the sign-in page. */
 export const SESSION_EXPIRED = "marathon:session-expired";
 
+/** Fired on window after something that changes the session status (e.g. disconnecting Strava). */
+export const SESSION_CHANGED = "marathon:session-changed";
+
 /** fetch + JSON, turning FastAPI error bodies into readable Error messages. */
 export async function api(path, options) {
   const res = await fetch(path, options);

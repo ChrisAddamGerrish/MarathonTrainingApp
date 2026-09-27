@@ -7,6 +7,9 @@ Connecting a client (it must be started from the project root so `backend` is im
   - Claude Desktop: add the same entry to claude_desktop_config.json under "mcpServers", with an
     absolute path to .venv\\Scripts\\python.exe and "cwd" set to the project root.
 
+It works on one user's data: the account named by $MARATHON_MCP_USER, or else the first admin
+(the database's original owner). Like the web app, it only ever sees that user's rows.
+
 There is no AI in here. It just exposes a set of tools; whichever client connects decides when to
 call them. Every tool goes through the same repository layer and validation as the REST API, and
 the history triggers live in the database, so changes made here show up in the History tab and can
@@ -20,6 +23,7 @@ the repository makes. Records go to stderr, which most clients discard, and to l
 """
 import functools
 import logging
+import os
 import time
 from contextlib import contextmanager
 from datetime import date
@@ -29,12 +33,13 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field, ValidationError
+from sqlalchemy import select
 
 from backend.app.core import config
-from backend.app.core.database import SessionLocal, init_db
+from backend.app.core.database import SessionLocal, Tenant, tenant_of, user_session, init_db
 from backend.app.core.errors import AppError
 from backend.app.core.logging_config import setup_logging
-from backend.app.models.models import ACTIVITY_COLUMNS
+from backend.app.models.models import ACTIVITY_COLUMNS, User
 from backend.app.repository import repository as repo
 from backend.app.schemas.schemas import ActivityIn, Category
 from backend.app.services import planning
@@ -85,11 +90,31 @@ _SESSION_FIELDS = (
 )
 
 
+_tenant: Optional[Tenant] = None
+
+
+def tenant() -> Tenant:
+    """The user this server works for (see the module docstring), looked up once."""
+    global _tenant
+    if _tenant is None:
+        name = os.environ.get("MARATHON_MCP_USER")
+        with SessionLocal() as session:
+            stmt = select(User).where(User.username == name) if name else \
+                select(User).where(User.is_admin).order_by(User.user_id).limit(1)
+            user = session.scalars(stmt).first()
+        if user is None:
+            raise ToolError(f"No user named {name!r}." if name else "There are no users yet.")
+        _tenant = Tenant(user.user_id, user.plan_start)
+        log.info("Working on the data of %s (user %s)", user.username, user.user_id)
+    return _tenant
+
+
 @contextmanager
 def db():
-    """One database session per tool call. The project's domain errors become tool errors that
-    keep their message, so the client can read why a call failed (anything else is hidden)."""
-    with SessionLocal() as session:
+    """One database session per tool call, over the server's user's data. The project's domain
+    errors become tool errors that keep their message, so the client can read why a call failed
+    (anything else is hidden)."""
+    with user_session(tenant()) as session:
         try:
             yield session
         except AppError as e:
@@ -112,10 +137,11 @@ def _activity_values(**fields: Any) -> dict[str, Any]:
 def get_summary() -> dict[str, Any]:
     """Race countdown, current training week, miles run, plan adherence and skipped sessions."""
     with db() as s:
-        today = date.today()
-        plan = planning.build_plan(repo.plan_rows(s), today)
+        today, start = date.today(), tenant_of(s).plan_start
+        plan = planning.build_plan(repo.plan_rows(s), today, start)
         acts = repo.activity_rows(s)
-        return planning.build_summary(plan, acts, planning.build_weeks(plan, acts), today)
+        weeks = planning.build_weeks(repo.plan_week_rows(s), plan, acts, start)
+        return planning.build_summary(plan, acts, weeks, today, start)
 
 
 @tool(READ)
@@ -124,12 +150,12 @@ def get_week(week: Optional[int] = None) -> dict[str, Any]:
     plan_id, status (done / missed / upcoming / skipped ...) and what was logged, plus activities
     logged that week without a plan link. Use the plan_ids here when logging activities."""
     with db() as s:
-        today = date.today()
-        plan = planning.build_plan(repo.plan_rows(s), today)
+        today, start = date.today(), tenant_of(s).plan_start
+        plan = planning.build_plan(repo.plan_rows(s), today, start)
         acts = repo.activity_rows(s)
-        weeks = planning.build_weeks(plan, acts)
+        weeks = planning.build_weeks(repo.plan_week_rows(s), plan, acts, start)
         last = weeks[-1]["week"]
-        number = week if week is not None else min(max(planning.week_of(today), 1), last)
+        number = week if week is not None else min(max(planning.week_of(today, start), 1), last)
         totals = next((w for w in weeks if w["week"] == number), None)
         if totals is None:
             raise ToolError(f"Week {number} is not in the plan (weeks 1-{last}).")

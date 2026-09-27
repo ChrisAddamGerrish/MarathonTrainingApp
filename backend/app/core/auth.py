@@ -1,13 +1,19 @@
-"""Sign-in for the web app: one user, a scrypt password hash and signed session cookies.
+"""Sign-in for the web app: users with scrypt password hashes, and signed session cookies.
 
-The login lives in config.AUTH_FILE (auth.env, git-ignored) as KEY=VALUE lines:
-  MARATHON_USER, MARATHON_PASSWORD_HASH (scrypt, never the password) and MARATHON_SECRET_KEY
-  (signs session cookies). Set it up or change it with:
+Accounts live in the users table (models.User); new people register with an invite code an admin
+hands out (services/accounts.py). config.AUTH_FILE (auth.env, git-ignored) now only holds
+MARATHON_SECRET_KEY, which signs session cookies. (Its old MARATHON_USER / MARATHON_PASSWORD_HASH
+lines became user 1 when the database was migrated; database.migrate_to_multi_user.)
 
-    .venv\\Scripts\\python.exe -m backend.app.core.auth
+From the command line:
 
-start.ps1 runs that on first start and with -ResetLogin. The file is re-read when it changes, so a
-new password applies without restarting, and signs out every existing session.
+    .venv\\Scripts\\python.exe -m backend.app.core.auth           set a user's password (a user that
+                                                               doesn't exist yet is created, as an admin)
+    .venv\\Scripts\\python.exe -m backend.app.core.auth invite    print a new invite code
+    .venv\\Scripts\\python.exe -m backend.app.core.auth check     exit code 0 if anyone can sign in
+
+start.ps1 runs the first on first start and with -ResetLogin. A new password signs out every
+existing session of that user.
 """
 import base64
 import getpass
@@ -18,7 +24,7 @@ import re
 import secrets
 import sys
 import time
-from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Optional
 
 from backend.app.core import config
@@ -30,17 +36,10 @@ COOKIE = "marathon_session"
 REMEMBER_SECONDS = 90 * 24 * 3600
 SESSION_SECONDS = 12 * 3600
 MIN_PASSWORD_LENGTH = 12
-USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 
 # scrypt cost: 16 MiB of memory and ~50 ms per check. Stored with the hash so it can be raised later.
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2**14, 8, 1
-
-
-@dataclass(frozen=True)
-class Credentials:
-    user: str
-    password_hash: str
-    secret: str
 
 
 def _b64(raw: bytes) -> str:
@@ -75,93 +74,77 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
-# --------------------------------------------------------------------------
-# The login file
-# --------------------------------------------------------------------------
-
-_cache: tuple[Optional[float], Optional[Credentials]] = (None, None)
+# Checked against when the username doesn't exist, so that takes as long as a wrong password.
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
 
 
-def load_credentials() -> Optional[Credentials]:
-    """The configured login, or None if the login file is missing or incomplete."""
-    global _cache
-    try:
-        mtime = config.AUTH_FILE.stat().st_mtime
-    except OSError:
-        return None
-    if _cache[0] != mtime:
-        values = config.read_env_file(config.AUTH_FILE)
-        user, password_hash, secret = (values.get(k) for k in
-                                       ("MARATHON_USER", "MARATHON_PASSWORD_HASH", "MARATHON_SECRET_KEY"))
-        _cache = (mtime, Credentials(user, password_hash, secret) if user and password_hash and secret else None)
-    return _cache[1]
-
-
-def check_login(username: str, password: str, creds: Credentials) -> bool:
-    # Always run the (slow) password check, so a wrong username takes as long as a wrong password.
-    password_ok = verify_password(password, creds.password_hash)
-    return hmac.compare_digest(username.encode(), creds.user.encode()) and password_ok
+def check_password(password: str, stored: Optional[str]) -> bool:
+    """Whether `password` matches; always does the (slow) check, even for a missing account."""
+    ok = verify_password(password, stored or _DUMMY_HASH)
+    return ok and bool(stored)
 
 
 # --------------------------------------------------------------------------
-# Session cookies: base64(JSON payload) + "." + HMAC. The key mixes in the password hash, so
-# changing the password invalidates every session issued before.
+# The cookie-signing key (auth.env)
 # --------------------------------------------------------------------------
 
 
-def _signature(payload: str, creds: Credentials) -> str:
-    key = hashlib.sha256(f"{creds.secret}:{creds.password_hash}".encode()).digest()
+def secret_key() -> str:
+    """MARATHON_SECRET_KEY from auth.env, created (and saved) the first time it's needed."""
+    values = config.read_env_file(config.AUTH_FILE)
+    if values.get("MARATHON_SECRET_KEY"):
+        return values["MARATHON_SECRET_KEY"]
+    key = secrets.token_urlsafe(32)
+    lines = config.AUTH_FILE.read_text(encoding="utf-8").splitlines() if config.AUTH_FILE.exists() else [
+        "# Signs the web app's session cookies. Keep it private; changing it signs everyone out."]
+    config.AUTH_FILE.write_text("\n".join(lines + [f"MARATHON_SECRET_KEY={key}"]) + "\n", encoding="utf-8")
+    return key
+
+
+# --------------------------------------------------------------------------
+# Session cookies: base64(JSON payload) + "." + HMAC. The key mixes in the user's password hash,
+# so changing a password invalidates every session that user had.
+# --------------------------------------------------------------------------
+
+
+def _signature(payload: str, password_hash: str) -> str:
+    key = hashlib.sha256(f"{secret_key()}:{password_hash}".encode()).digest()
     return _b64(hmac.new(key, payload.encode(), hashlib.sha256).digest())
 
 
-def create_session(creds: Credentials, lifetime: int = SESSION_SECONDS) -> str:
-    payload = _b64(json.dumps({"u": creds.user, "exp": int(time.time()) + lifetime}).encode())
-    return f"{payload}.{_signature(payload, creds)}"
+def create_session(user_id: int, password_hash: str, lifetime: int = SESSION_SECONDS) -> str:
+    payload = _b64(json.dumps({"uid": user_id, "exp": int(time.time()) + lifetime}).encode())
+    return f"{payload}.{_signature(payload, password_hash)}"
 
 
-def session_user(token: Optional[str]) -> Optional[str]:
-    """The signed-in user for a session cookie value, or None if it is missing, forged or expired."""
-    creds = load_credentials()
-    if not token or creds is None or "." not in token:
+def read_session(token: Optional[str], password_hash_of) -> Optional[int]:
+    """The user id a session cookie was issued to, or None if it is missing, forged or expired.
+    `password_hash_of(user_id)` returns that user's current hash (None if there's no such user)."""
+    if not token or "." not in token:
         return None
     payload, signature = token.rsplit(".", 1)
-    if not hmac.compare_digest(signature, _signature(payload, creds)):
-        return None
     try:
         data = json.loads(_unb64(payload))
-    except ValueError:
+        user_id = int(data["uid"])
+    except (ValueError, KeyError, TypeError):
         return None
-    if data.get("u") != creds.user or data.get("exp", 0) < time.time():
+    stored = password_hash_of(user_id)
+    if not stored or not hmac.compare_digest(signature, _signature(payload, stored)):
         return None
-    return creds.user
+    return user_id if data.get("exp", 0) >= time.time() else None
 
 
 # --------------------------------------------------------------------------
-# Setup: python -m backend.app.core.auth
+# Command line
 # --------------------------------------------------------------------------
 
 
-def write_credentials(user: str, password: str) -> None:
-    """Save a login, keeping the existing secret key (or making one) and any other lines."""
-    lines, secret = [], None
-    if config.AUTH_FILE.exists():
-        for line in config.AUTH_FILE.read_text(encoding="utf-8").splitlines():
-            key = line.split("=", 1)[0].strip()
-            if key == "MARATHON_SECRET_KEY":
-                secret = line.split("=", 1)[1].strip()
-            elif key not in ("MARATHON_USER", "MARATHON_PASSWORD_HASH"):
-                lines.append(line)
-    if not lines:
-        lines = ["# Web app login, written by `python -m backend.app.core.auth`. Keep it private."]
-    lines += [f"MARATHON_USER={user}", f"MARATHON_PASSWORD_HASH={hash_password(password)}",
-              f"MARATHON_SECRET_KEY={secret or secrets.token_urlsafe(32)}"]
-    config.AUTH_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def _set_password() -> int:
+    from backend.app.core.database import init_db
+    from backend.app.services import accounts
 
-
-def main() -> int:
-    current = load_credentials()
-    prompt = f"Username (Enter keeps '{current.user}'): " if current else "Username: "
-    user = input(prompt).strip() or (current.user if current else "")
+    init_db()
+    user = input("Username: ").strip()
     if not USERNAME_PATTERN.match(user):
         print("The username may only contain letters, digits, dot, dash and underscore.", file=sys.stderr)
         return 1
@@ -172,10 +155,43 @@ def main() -> int:
     if getpass.getpass("Password again: ") != password:
         print("The passwords did not match.", file=sys.stderr)
         return 1
-    write_credentials(user, password)
-    print(f"Login saved to {config.AUTH_FILE}. Existing sessions are signed out.")
+    today = date.today()
+    created = accounts.set_password(user, password, plan_start=today - timedelta(days=today.weekday()))
+    print(f"{'Admin account created' if created else 'Password changed'} for {user}. "
+          "Its existing sessions are signed out.")
     return 0
 
 
+def _invite() -> int:
+    from backend.app.core.database import init_db
+    from backend.app.services import accounts
+
+    init_db()
+    code, expires = accounts.create_invite(created_by=None)
+    print(f"Invite code: {code}  (single use, expires {expires[:10]})")
+    return 0
+
+
+def _check() -> int:
+    from backend.app.core.database import SessionLocal, init_db
+    from backend.app.services import accounts
+
+    init_db()
+    with SessionLocal() as session:
+        return 0 if accounts.any_can_sign_in(session) else 1
+
+
+def main(argv: list[str]) -> int:
+    secret_key()
+    if argv[1:] == ["invite"]:
+        return _invite()
+    if argv[1:] == ["check"]:
+        return _check()
+    if argv[1:]:
+        print(__doc__, file=sys.stderr)
+        return 2
+    return _set_password()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv))

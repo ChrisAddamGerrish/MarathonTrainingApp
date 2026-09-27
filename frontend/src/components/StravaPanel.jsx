@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useData } from "../contexts/DataContext";
 import { useToast } from "../contexts/ToastContext";
-import { api, jsonRequest } from "../services/api";
+import { api, jsonRequest, SESSION_CHANGED } from "../services/api";
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -57,10 +57,13 @@ export default function StravaPanel() {
   }
 
   async function disconnect() {
-    if (!window.confirm("Disconnect Strava? Workouts already imported stay in your log.")) return;
+    const question =
+      "Disconnect Strava? You'll need to connect it again to keep using the app. Workouts already imported stay in your log.";
+    if (!window.confirm(question)) return;
     try {
       setStatus(await api("/api/strava/disconnect", jsonRequest("POST", {})));
       toast("Strava disconnected");
+      window.dispatchEvent(new Event(SESSION_CHANGED)); // back to the connect step
     } catch (e) {
       toast(e.message, true);
     }

@@ -8,12 +8,12 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from unittest import mock
 
-from tests import LOG_DIR, TEST_DB, TMP, signed_in_client  # noqa: F401  (importing tests points the backend at the temp copies)
+from tests import LOG_DIR, TEST_DB, TMP, owner_session, signed_in_client  # noqa: F401  (importing tests points the backend at the temp copies)
 
 from fastapi.testclient import TestClient
 
 from backend.app.core import config, logging_config
-from backend.app.core.database import SessionLocal, engine, init_db
+from backend.app.core.database import engine, init_db
 from backend.app.main import app
 from backend.app.repository import repository as repo
 from backend.app.schemas.schemas import ActivityIn
@@ -111,7 +111,7 @@ class SetupLoggingTests(unittest.TestCase):
 
 class RepositoryLoggingTests(unittest.TestCase):
     def test_every_kind_of_change_is_logged(self):
-        with SessionLocal() as s, self.assertLogs("marathon.repo", "INFO") as logs:
+        with owner_session() as s, self.assertLogs("marathon.repo", "INFO") as logs:
             created = repo.create_activity(s, values())
             repo.update_activity(s, created["activity_id"], values(notes="changed"))
             repo.update_activity(s, created["activity_id"], values(notes="changed"))
@@ -130,7 +130,7 @@ class RepositoryLoggingTests(unittest.TestCase):
         ])
 
     def test_skip_and_unskip_are_logged(self):
-        with SessionLocal() as s:
+        with owner_session() as s:
             target = next(p for p in repo.plan_rows(s) if p["category"] != "Rest" and not p["skipped"]
                           and not p["linked_activity_count"])
             with self.assertLogs("marathon.repo", "INFO") as logs:
@@ -142,7 +142,7 @@ class RepositoryLoggingTests(unittest.TestCase):
         ])
 
     def test_refused_changes_are_not_logged_as_changes(self):
-        with SessionLocal() as s, self.assertNoLogs("marathon.repo", "INFO"):
+        with owner_session() as s, self.assertNoLogs("marathon.repo", "INFO"):
             with self.assertRaises(Exception):
                 repo.delete_activity(s, 999999)
 

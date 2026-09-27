@@ -182,7 +182,8 @@ class ToolLoggingTests(unittest.IsolatedAsyncioTestCase):
                 await call(client, "list_activities", limit=2, week=1)
                 with self.assertRaises(ToolFailed):
                     await call(client, "get_week", week=999)
-        ok, refused = logs.records
+        # (The first call also logs whose data the server works on.)
+        ok, refused = [r for r in logs.records if not r.getMessage().startswith("Working on")]
         self.assertEqual((ok.levelname, refused.levelname), ("INFO", "WARNING"))
         self.assertRegex(ok.getMessage(), r"^list_activities\(limit=2, week=1\) ok in \d+ ms$")
         self.assertRegex(refused.getMessage(), r"^get_week\(week=999\) refused: Week 999 is not in the plan")
