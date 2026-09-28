@@ -34,3 +34,5 @@ __pycache__/
 /backups/
 /logs/
 /caddy.env
+# Machine-specific Compose additions (e.g. joining a home-lab proxy network)
+/compose.override.yaml

@@ -37,7 +37,9 @@ export default function Login({ configured, expired, onSignedIn, onRegister }) {
         <h1>Sign in</h1>
         {!configured && (
           <p className="form-error" role="alert">
-            Sign-in isn't set up yet. On the server, run start.ps1 -ResetLogin.
+            Sign-in isn't set up yet. On the server, create the first account: run{" "}
+            <code>start.ps1 -ResetLogin</code>, or with Docker{" "}
+            <code>docker compose exec app python -m backend.cli</code>.
           </p>
         )}
         {expired && configured && <p className="muted">Your session ended. Sign in again to continue.</p>}

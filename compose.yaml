@@ -1,6 +1,7 @@
 # Marathon Training in Docker (see README.md, "Docker").
 #
-#   docker compose up -d --build                    the app, on http://localhost:8000 (this PC only)
+#   docker compose up -d --build                    the app, on http://localhost:8000 (this machine only,
+#                                                   unless .env sets MARATHON_BIND)
 #   docker compose --profile proxy up -d --build    plus Caddy, to reach it from other devices
 #   docker compose exec app python -m backend.cli   create the first admin / change a password
 #
@@ -19,10 +20,11 @@ services:
     environment:
       TZ: ${TZ:-UTC} # the plan's "today" follows this
       MARATHON_LOG_LEVEL: ${MARATHON_LOG_LEVEL:-INFO}
-      # Trust X-Forwarded-* from Caddy. Safe while the port below is published on 127.0.0.1 only.
-      FORWARDED_ALLOW_IPS: "*"
+      # Trust X-Forwarded-* from Caddy. Safe while the port below is published on 127.0.0.1 only;
+      # when publishing to the LAN without Caddy, set it to 127.0.0.1 (see .env.example).
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
     ports:
-      - "127.0.0.1:${MARATHON_PORT:-8000}:8000"
+      - "${MARATHON_BIND:-127.0.0.1}:${MARATHON_PORT:-8000}:8000"
     volumes:
       - data:/app/data # database, backups/, logs/, strava_tokens.json
       - secrets:/app/secrets # auth.env: the cookie-signing key, created on first start
