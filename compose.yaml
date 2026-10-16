@@ -12,7 +12,9 @@ name: marathon
 services:
   app:
     build: .
-    image: marathon:latest
+    # MARATHON_IMAGE (in .env) runs the image CI publishes instead of building here; see
+    # deploy/homelab-update.sh.
+    image: ${MARATHON_IMAGE:-marathon:latest}
     restart: unless-stopped
     env_file:
       - path: strava.env # STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET

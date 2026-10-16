@@ -117,6 +117,32 @@ Copying `auth.env` keeps everyone signed in. Without it, people just sign in aga
 **Backups:** the data lives in the `marathon_data` volume. The app's **Export CSV** buttons, or
 `docker compose cp app:/app/data/marathon.db .`, get a copy out.
 
+## Continuous deployment
+
+`.github/workflows/ci.yml` runs the tests, the type check and a frontend build on every push and
+pull request. When master passes, it builds the image (for x86 and ARM) and publishes it to
+`ghcr.io/chrisaddamgerrish/marathontrainingapp`, tagged `latest` and `sha-<commit>`.
+
+The home lab pulls the image itself, so nothing on the home network has to be reachable from
+GitHub. `deploy/homelab-update.sh` fast-forwards the checkout, pulls the image and restarts the app
+only when the image changed (the data and secrets volumes are kept). To set it up, on the home lab,
+in the project folder:
+
+1. Add `MARATHON_IMAGE=ghcr.io/chrisaddamgerrish/marathontrainingapp:latest` to `.env`.
+2. Let it pull the image. Either make the package public (GitHub: your profile, **Packages**,
+   `marathontrainingapp`, **Package settings**, **Change visibility**; the image holds no data or
+   secrets), or sign in once with a personal access token that has `read:packages`:
+   `docker login ghcr.io -u ChrisAddamGerrish`.
+3. Run it once by hand, `sh deploy/homelab-update.sh`, then from `crontab -e`:
+
+   ```
+   */5 * * * * /path/to/MarathonTrainingApp/deploy/homelab-update.sh >> $HOME/marathon-update.log 2>&1
+   ```
+
+A push to master is then live within about five minutes of CI finishing. To roll back, set
+`MARATHON_IMAGE` to an older `sha-<commit>` tag and run the script; set it back to `latest` to
+follow master again.
+
 ## Project layout
 
 ```
@@ -132,7 +158,8 @@ backend/
   cli.py          command-line account management
   mcp_server.py   MCP server
 frontend/src/     React app: views/, components/, contexts/, hooks/, services/, utils/
-deploy/           Caddyfile and caddy.env.example
+deploy/           Caddyfile, caddy.env.example, homelab-update.sh (see "Continuous deployment")
+.github/workflows/ CI: tests, and the image the home lab deploys
 Dockerfile, compose.yaml, .env.example   Docker setup (see "Docker")
 tests/            unittest suite (runs against a temporary copy of tests/fixtures/single-user.db)
 data/             created at runtime, git-ignored: marathon.db, backups/, strava_tokens.json, logs/
