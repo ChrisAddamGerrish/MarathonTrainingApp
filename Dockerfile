@@ -8,7 +8,9 @@
 # image would not make it smaller).
 
 # --- Front end ---------------------------------------------------------------------------------
-FROM node:24-alpine AS frontend
+# Built on the build machine's own platform: the output is plain JS and CSS, the same for every
+# target, so a multi-platform build (see .github/workflows/ci.yml) doesn't run npm under emulation.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
