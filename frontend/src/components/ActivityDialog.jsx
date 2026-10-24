@@ -4,7 +4,7 @@ import { useData } from "../contexts/DataContext";
 import { DetailRows, DiffRows } from "./ActivityDiff";
 import { diffActivity } from "../utils/diff";
 import { CATEGORIES } from "../utils/format";
-import { planLinkWarnings } from "../utils/planLink";
+import { planLinkWarnings, planWeekOf } from "../utils/planLink";
 import StravaDetails from "./StravaDetails";
 
 const str = v => (v == null ? "" : String(v));
@@ -34,9 +34,13 @@ function initialValues(activity, prefill) {
   };
 }
 
-/** <option>s for the "counts toward planned session" select: this date's sessions first. */
-function PlanOptions({ plan, dateIso, selected }) {
-  const rows = plan.filter(p => p.category !== "Rest" || p.plan_id === selected);
+/** <option>s for the "counts toward planned session" select: this date's sessions first, then the
+ * rest by week. With `week` set only that plan week's sessions are offered (the one already picked
+ * stays listed so the select still shows it). */
+function PlanOptions({ plan, week, dateIso, selected }) {
+  const rows = plan.filter(
+    p => p.plan_id === selected || (p.category !== "Rest" && (week == null || p.week === week)),
+  );
   const label = p => `W${p.week} ${p.day} · ${p.planned_session}`;
   const same = rows.filter(p => p.date === dateIso);
   const byWeek = {};
@@ -82,6 +86,9 @@ export default function ActivityDialog({ session, onClose, onFinish }) {
   const [review, setReview] = useState(reviewOnly ? session.review : null);
   const [reviewError, setReviewError] = useState("");
   const [confirming, setConfirming] = useState(false);
+  // Linking to another week's session is allowed, but only offered once this is unticked.
+  const [sameWeekOnly, setSameWeekOnly] = useState(true);
+  const activityWeek = values ? planWeekOf(values.activity_date, data.summary.plan_start) : null;
 
   // Open as a native modal; closing it any way (Esc, backdrop, buttons) reports back via onClose.
   useEffect(() => {
@@ -100,7 +107,7 @@ export default function ActivityDialog({ session, onClose, onFinish }) {
   }, [onClose]);
 
   const warnings = useMemo(
-    () => (values ? planLinkWarnings(data.plan, original, values.plan_id, values.activity_date) : []),
+    () => (values ? planLinkWarnings(data.plan, data.summary.plan_start, original, values.plan_id, values.activity_date) : []),
     [data.plan, original, values],
   );
 
@@ -157,7 +164,7 @@ export default function ActivityDialog({ session, onClose, onFinish }) {
       return;
     }
     const linkChanged = changes.some(c => c.field === "plan_id" || c.field === "activity_date");
-    const warns = linkChanged ? planLinkWarnings(data.plan, original, body.plan_id, body.activity_date) : [];
+    const warns = linkChanged ? planLinkWarnings(data.plan, data.summary.plan_start, original, body.plan_id, body.activity_date) : [];
     setReview({
       title: "Review changes",
       body: (
@@ -267,8 +274,17 @@ export default function ActivityDialog({ session, onClose, onFinish }) {
               <span>Counts toward planned session</span>
             </label>
             <select id="plan-select" value={values.plan_id} onChange={onPlanChange}>
-              <PlanOptions plan={data.plan} dateIso={values.activity_date} selected={values.plan_id} />
+              <PlanOptions
+                plan={data.plan}
+                week={sameWeekOnly ? activityWeek : null}
+                dateIso={values.activity_date}
+                selected={values.plan_id}
+              />
             </select>
+            <label className="check">
+              <input type="checkbox" checked={sameWeekOnly} onChange={e => setSameWeekOnly(e.target.checked)} />
+              Only this week's sessions
+            </label>
             <div className={"hint" + (warnings.length ? " warn" : "")} aria-live="polite">
               {warnings.join(" ")}
             </div>

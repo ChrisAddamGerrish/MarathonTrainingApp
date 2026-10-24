@@ -1,11 +1,21 @@
 import { fmtDate } from "./format";
 
-/** Warnings about linking an activity to a planned session (wrong date, already filled). */
-export function planLinkWarnings(plan, original, planId, dateIso) {
+/** 1-based plan week of an ISO date; plan_start is the Monday of week 1 (as planning.week_of). */
+export function planWeekOf(dateIso, planStart) {
+  if (!dateIso || !planStart) return null;
+  const days = (Date.parse(dateIso + "T00:00:00Z") - Date.parse(planStart + "T00:00:00Z")) / 86400000;
+  return Math.floor(days / 7) + 1;
+}
+
+/** Warnings about linking an activity to a planned session (other week, wrong date, already filled). */
+export function planLinkWarnings(plan, planStart, original, planId, dateIso) {
   const p = planId && plan.find(x => x.plan_id === planId);
   if (!p) return [];
   const out = [];
-  if (p.date !== dateIso) {
+  const week = planWeekOf(dateIso, planStart);
+  if (week != null && p.week !== week) {
+    out.push(`${p.plan_id} is in week ${p.week}, but this activity is in week ${week}; it will count toward another week's plan.`);
+  } else if (p.date !== dateIso) {
     out.push(`${p.plan_id} is planned for ${fmtDate(p.date)}, but this activity is dated ${fmtDate(dateIso)}.`);
   }
   const others = p.linked_activity_count - (original?.plan_id === planId ? 1 : 0);
