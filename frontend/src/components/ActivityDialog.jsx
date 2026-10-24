@@ -34,14 +34,17 @@ function initialValues(activity, prefill) {
   };
 }
 
-/** <option>s for the "counts toward planned session" select: only sessions of the activity's own
- * plan week can be picked, this date's first. A link to another week (made before that rule) stays
- * listed so the select still shows it. */
+/** <option>s for the "counts toward planned session" select: this date's sessions first, then the
+ * rest by week. With `week` set only that plan week's sessions are offered (the one already picked
+ * stays listed so the select still shows it). */
 function PlanOptions({ plan, week, dateIso, selected }) {
-  const rows = plan.filter(p => (p.week === week && p.category !== "Rest") || p.plan_id === selected);
+  const rows = plan.filter(
+    p => p.plan_id === selected || (p.category !== "Rest" && (week == null || p.week === week)),
+  );
   const label = p => `W${p.week} ${p.day} · ${p.planned_session}`;
   const same = rows.filter(p => p.date === dateIso);
-  const rest = rows.filter(p => p.date !== dateIso);
+  const byWeek = {};
+  rows.filter(p => p.date !== dateIso).forEach(p => (byWeek[p.week] ||= []).push(p));
   const opt = p => (
     <option key={p.plan_id} value={p.plan_id}>
       {label(p)}
@@ -51,7 +54,11 @@ function PlanOptions({ plan, week, dateIso, selected }) {
     <>
       <option value="">— Not linked (unplanned) —</option>
       {same.length > 0 && <optgroup label="Planned for this date">{same.map(opt)}</optgroup>}
-      {rest.length > 0 && <optgroup label={`Rest of week ${week}`}>{rest.map(opt)}</optgroup>}
+      {Object.entries(byWeek).map(([w, ps]) => (
+        <optgroup key={w} label={`Week ${w}`}>
+          {ps.map(opt)}
+        </optgroup>
+      ))}
     </>
   );
 }
@@ -79,6 +86,9 @@ export default function ActivityDialog({ session, onClose, onFinish }) {
   const [review, setReview] = useState(reviewOnly ? session.review : null);
   const [reviewError, setReviewError] = useState("");
   const [confirming, setConfirming] = useState(false);
+  // Linking to another week's session is allowed, but only offered once this is unticked.
+  const [sameWeekOnly, setSameWeekOnly] = useState(true);
+  const activityWeek = values ? planWeekOf(values.activity_date, data.summary.plan_start) : null;
 
   // Open as a native modal; closing it any way (Esc, backdrop, buttons) reports back via onClose.
   useEffect(() => {
@@ -266,11 +276,15 @@ export default function ActivityDialog({ session, onClose, onFinish }) {
             <select id="plan-select" value={values.plan_id} onChange={onPlanChange}>
               <PlanOptions
                 plan={data.plan}
-                week={planWeekOf(values.activity_date, data.summary.plan_start)}
+                week={sameWeekOnly ? activityWeek : null}
                 dateIso={values.activity_date}
                 selected={values.plan_id}
               />
             </select>
+            <label className="check">
+              <input type="checkbox" checked={sameWeekOnly} onChange={e => setSameWeekOnly(e.target.checked)} />
+              Only this week's sessions
+            </label>
             <div className={"hint" + (warnings.length ? " warn" : "")} aria-live="polite">
               {warnings.join(" ")}
             </div>

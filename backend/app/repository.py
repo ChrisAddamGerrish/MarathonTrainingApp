@@ -261,22 +261,13 @@ def get_activity(session: Session, activity_id: int) -> dict[str, Any]:
     return _activity(session, _get_activity(session, activity_id))
 
 
-def _check_plan_link(session: Session, plan_id: Optional[str], activity_date: date) -> None:
-    """An activity can only count toward a planned session of the plan week it was done in."""
-    if not plan_id:
-        return
-    plan = _find_plan(session, plan_id)
-    if plan is None:
+def _check_plan_id(session: Session, plan_id: Optional[str]) -> None:
+    if plan_id and _find_plan(session, plan_id) is None:
         raise UnprocessableError(f"Unknown plan session '{plan_id}'")
-    week = week_of(activity_date, tenant_of(session).plan_start)
-    if plan.week != week:
-        raise UnprocessableError(
-            f"{plan_id} is in week {plan.week}, but this activity was done in week {week}; "
-            "an activity can only count toward a session of its own week")
 
 
 def create_activity(session: Session, values: dict[str, Any]) -> dict[str, Any]:
-    _check_plan_link(session, values.get("plan_id"), values["activity_date"])
+    _check_plan_id(session, values.get("plan_id"))
     activity = ActivityLog(**values)
     session.add(activity)
     session.commit()
@@ -287,10 +278,7 @@ def create_activity(session: Session, values: dict[str, Any]) -> dict[str, Any]:
 
 def update_activity(session: Session, activity_id: int, values: dict[str, Any]) -> dict[str, Any]:
     activity = _get_activity(session, activity_id)
-    plan_id, activity_date = values.get("plan_id"), values.get("activity_date", activity.activity_date)
-    # Only a changed link is checked, so links made before the rule existed can still be edited.
-    if (plan_id, activity_date) != (activity.plan_id, activity.activity_date):
-        _check_plan_link(session, plan_id, activity_date)
+    _check_plan_id(session, values.get("plan_id"))
     changed = []
     for column, value in values.items():
         if getattr(activity, column) != value:

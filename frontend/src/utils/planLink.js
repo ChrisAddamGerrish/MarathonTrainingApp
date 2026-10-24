@@ -14,7 +14,7 @@ export function planLinkWarnings(plan, planStart, original, planId, dateIso) {
   const out = [];
   const week = planWeekOf(dateIso, planStart);
   if (week != null && p.week !== week) {
-    out.push(`${p.plan_id} is in week ${p.week}, but this activity is in week ${week}; it can only count toward a session of its own week.`);
+    out.push(`${p.plan_id} is in week ${p.week}, but this activity is in week ${week}; it will count toward another week's plan.`);
   } else if (p.date !== dateIso) {
     out.push(`${p.plan_id} is planned for ${fmtDate(p.date)}, but this activity is dated ${fmtDate(dateIso)}.`);
   }

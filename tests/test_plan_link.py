@@ -1,14 +1,16 @@
-"""Tests for linking an activity to a planned session: only sessions of the activity's own plan week.
+"""Tests for linking an activity to a planned session, in its own plan week or another one.
+
+The activity dialog only offers the activity's own week unless you untick "Only this week's
+sessions"; the backend accepts a link to any week.
 
 Run from the project root:   .venv\Scripts\python.exe -m unittest tests.test_plan_link -v
 """
 import unittest
-from datetime import timedelta
 from pathlib import Path
 
 from tests import OWNER_PLAN_START, TEST_DB, owner_session, signed_in_client
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from backend.app.core import config
 from backend.app.core.database import engine, init_db
@@ -66,40 +68,27 @@ class PlanLinkTests(unittest.TestCase):
             with self.subTest(plan_id=plan_id):
                 self.assertEqual(self.create(plan_id=plan_id)["plan_id"], plan_id)
 
-    def test_a_session_of_another_week_is_rejected(self):
-        with owner_session() as s, self.assertRaises(UnprocessableError) as caught:
-            repo.create_activity(s, values(plan_id=self.other_week[-1]))
-        self.assertIn(f"week {WEEK + 1}", caught.exception.detail)
-        self.assertIn(f"week {WEEK}", caught.exception.detail)
+    def test_a_session_of_another_week_can_be_linked(self):
+        created = self.create(plan_id=self.other_week[-1])
+        self.assertEqual(created["plan_id"], self.other_week[-1])
+        self.assertEqual(created["week"], WEEK)  # the activity stays in the week it was done
 
-    def test_relinking_to_another_week_is_rejected(self):
+    def test_relinking_to_another_week_is_saved(self):
         created = self.create(plan_id=self.this_week[0])
-        with owner_session() as s, self.assertRaises(UnprocessableError):
-            repo.update_activity(s, created["activity_id"], values(plan_id=self.other_week[0]))
         with owner_session() as s:
-            self.assertEqual(repo.get_activity(s, created["activity_id"])["plan_id"], self.this_week[0])
+            updated = repo.update_activity(s, created["activity_id"], values(plan_id=self.other_week[0]))
+        self.assertEqual(updated["plan_id"], self.other_week[0])
 
-    def test_moving_a_linked_activity_to_another_week_is_rejected(self):
-        created = self.create(plan_id=self.this_week[0])
+    def test_an_unknown_session_is_still_rejected(self):
         with owner_session() as s, self.assertRaises(UnprocessableError):
-            repo.update_activity(s, created["activity_id"],
-                                 values(plan_id=self.this_week[0], activity_date=SATURDAY + timedelta(weeks=1)))
+            repo.create_activity(s, values(plan_id="W99-Nope"))
 
-    def test_an_existing_cross_week_link_can_still_be_edited(self):
-        created = self.create()
-        with owner_session() as s:  # a link made before the rule existed
-            s.execute(update(ActivityLog).where(ActivityLog.activity_id == created["activity_id"])
-                      .values(plan_id=self.other_week[0]))
-            s.commit()
-            updated = repo.update_activity(s, created["activity_id"],
-                                           values(plan_id=self.other_week[0], notes="still editable"))
-        self.assertEqual(updated["notes"], "still editable")
-
-    def test_the_api_answers_a_cross_week_link_with_422(self):
+    def test_the_api_saves_a_cross_week_link(self):
         response = signed_in_client().post("/api/activities", json={
             **values(plan_id=self.other_week[0]), "activity_date": SATURDAY.isoformat()})
-        self.assertEqual(response.status_code, 422, response.text)
-        self.assertIn("its own week", response.text)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.created.append(response.json()["activity_id"])
+        self.assertEqual(response.json()["plan_id"], self.other_week[0])
 
 
 if __name__ == "__main__":
