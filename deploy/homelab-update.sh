@@ -5,17 +5,31 @@
 # This pulls the latest commit (for compose.yaml and the Caddyfile) and the latest image, and
 # restarts the app only when the image changed. The data and secrets volumes are untouched.
 #
-# Needs MARATHON_IMAGE in .env (see .env.example), and git, docker and flock on the home lab.
+# Needs MARATHON_IMAGE in .env (see .env.example), and git and docker on the home lab. Works on
+# Linux and macOS.
 #   */5 * * * * /path/to/MarathonTrainingApp/deploy/homelab-update.sh >> /path/to/marathon-update.log 2>&1
 set -eu
 
 cd "$(dirname "$0")/.."
 
-# One run at a time, in case a pull takes longer than the cron interval.
-exec 9>"${TMPDIR:-/tmp}/marathon-update.lock"
-flock -n 9 || exit 0
+# cron's PATH is only /usr/bin:/bin. Docker Desktop, OrbStack and Homebrew install docker elsewhere.
+PATH="/usr/local/bin:/opt/homebrew/bin:$HOME/.docker/bin:$HOME/.orbstack/bin:$PATH"
+export PATH
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+
+# One run at a time, in case a pull takes longer than the cron interval. macOS has no flock, so
+# there a lock directory does the job (mkdir is atomic); one left by a killed run expires after
+# an hour.
+lock="${TMPDIR:-/tmp}/marathon-update.lock"
+if command -v flock > /dev/null; then
+    exec 9>"$lock"
+    flock -n 9 || exit 0
+else
+    find "$lock.d" -maxdepth 0 -mmin +60 -exec rmdir {} \; 2>/dev/null || true
+    mkdir "$lock.d" 2>/dev/null || exit 0
+    trap 'rmdir "$lock.d"' EXIT
+fi
 
 if ! grep -q '^MARATHON_IMAGE=' .env 2>/dev/null; then
     log "MARATHON_IMAGE isn't set in .env, so there is no published image to follow" >&2

@@ -139,6 +139,10 @@ in the project folder:
    */5 * * * * /path/to/MarathonTrainingApp/deploy/homelab-update.sh >> $HOME/marathon-update.log 2>&1
    ```
 
+   The script works on Linux and macOS, and finds Docker in the usual places (Docker Desktop,
+   OrbStack, Homebrew) even though cron's PATH doesn't include them. On a Mac, keep the project
+   outside Desktop, Documents and Downloads, which cron can't read without Full Disk Access.
+
 A push to master is then live within about five minutes of CI finishing. To roll back, set
 `MARATHON_IMAGE` to an older `sha-<commit>` tag and run the script; set it back to `latest` to
 follow master again.
