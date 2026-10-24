@@ -29,7 +29,7 @@ WORKDIR /app
 # greenlet is left out: it's SQLAlchemy's asyncio support, and the app's sessions are synchronous.
 # (cryptography stays, big as it is: the mcp package imports it on startup.)
 COPY pyproject.toml uv.lock ./
-RUN --mount=from=ghcr.io/astral-sh/uv:0.12,source=/uv,target=/usr/local/bin/uv \
+RUN --mount=from=ghcr.io/astral-sh/uv:0.13,source=/uv,target=/usr/local/bin/uv \
     --mount=type=cache,target=/root/.cache/uv \
     UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_COMPILE_BYTECODE=0 \
     uv sync --locked --no-dev --no-install-project --no-install-package greenlet
