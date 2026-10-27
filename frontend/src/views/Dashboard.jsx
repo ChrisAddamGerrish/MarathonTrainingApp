@@ -75,7 +75,7 @@ export default function Dashboard() {
       <div className="section">
         <div className="section-head">
           <h2>Weekly run miles</h2>
-          <span className="sub">Planned vs. actual across the {s.last_week}-week plan</span>
+          <span className="sub">Planned miles across the {s.last_week}-week plan, with miles run stacked in started weeks</span>
           <span className="spacer" />
           <button className="btn small" onClick={() => setChartTable(t => !t)}>
             {chartTable ? "Show chart" : "Show table"}
@@ -84,12 +84,29 @@ export default function Dashboard() {
         <div className="card chart-card">
           <div className="legend">
             <span>
-              <i style={{ background: "var(--series-planned)" }} />
-              Planned
+              <i style={{ background: "var(--wk-build)" }} />
+              Build
             </span>
             <span>
-              <i style={{ background: "var(--series-actual)" }} />
-              Actual
+              <i style={{ background: "var(--wk-stepback)" }} />
+              Step-back
+            </span>
+            <span>
+              <i style={{ background: "var(--wk-peak)" }} />
+              Peak / taper
+            </span>
+            <span>
+              <i style={{ background: "var(--wk-race)" }} />
+              Race
+            </span>
+            <span className="gap" />
+            <span>
+              <i style={{ background: "var(--wk-build)" }} />
+              Run
+            </span>
+            <span>
+              <i className="left" style={{ background: "var(--wk-build)" }} />
+              Not run yet / missed
             </span>
           </div>
           <WeeklyChart weeks={weeks} summary={s} showTable={chartTable} />
