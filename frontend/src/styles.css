@@ -11,6 +11,12 @@
   --accent-ink:#ffffff;
   --series-actual:  #2a78d6;
   --series-planned: #a8a69f;
+  /* Weekly chart bars, by plan week type; --wk-now marks the current week. */
+  --wk-build:    #4f9a8f;
+  --wk-stepback: #95a5aa;
+  --wk-peak:     #c2891a;
+  --wk-race:     #d9603f;
+  --wk-now:      #1f7f70;
   --c-run:      #2a78d6;
   --c-bike:     #eb6834;
   --c-strength: #1baf7a;
@@ -39,6 +45,11 @@
     --line:      #2f2f2c;
     --series-actual:  #3987e5;
     --series-planned: #6b6a64;
+    --wk-build:    #4f8f86;
+    --wk-stepback: #3c4c53;
+    --wk-peak:     #a9853f;
+    --wk-race:     #c0634b;
+    --wk-now:      #7fd1c3;
     --c-run:      #3987e5;
     --c-bike:     #d95926;
     --c-strength: #199e70;
@@ -201,6 +212,13 @@ a.btn { color: inherit; text-decoration: none; }
 #chart .hit { fill: transparent; cursor: pointer; }
 #chart .hit:hover, #chart .hit.on { fill: color-mix(in srgb, var(--ink) 5%, transparent); }
 #chart .now-band { fill: var(--surface-2); }
+#chart text.val { font-size: 10.5px; fill: var(--ink-2); font-variant-numeric: tabular-nums; }
+#chart text.val.strong { fill: var(--ink); }
+#chart .left { fill-opacity: .22; stroke-dasharray: 3 2; }
+#chart .over { stroke: var(--ink); stroke-width: 1.5; }
+#chart .marker { fill: var(--ink); }
+.legend i.left { opacity: .35; outline: 1px dashed var(--ink-2); outline-offset: -1px; }
+.legend .gap { width: 8px; }
 .tip {
   position: absolute; pointer-events: none; z-index: 5; background: var(--ink); color: var(--bg); padding: 8px 11px; border-radius: 9px;
   font-size: 12.5px; line-height: 1.5; white-space: nowrap; box-shadow: 0 6px 20px rgba(0,0,0,.25); transform: translate(-50%, -100%);
