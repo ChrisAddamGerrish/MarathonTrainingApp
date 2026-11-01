@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrandMark } from "../components/common";
+import GoalFields, { goalBody } from "../components/GoalFields";
 import { api, jsonRequest } from "../services/api";
 import { DAYS, fmtDate } from "../utils/format";
 
@@ -25,10 +26,8 @@ export default function Register({ onRegistered, onCancel }) {
     plan_start: nextMonday(),
     weeks: 20,
     build: true,
-    longest_run_mi: "",
-    weekly_mi: "",
-    runs_per_week: "4",
   });
+  const [goal, setGoal] = useState({ longest_run_mi: "", weekly_mi: "", runs_per_week: "4", pace: "", cross_training: [] });
   const [limits, setLimits] = useState(null); // the safe minimum for the longest run entered
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -38,7 +37,7 @@ export default function Register({ onRegistered, onCancel }) {
   }, []);
 
   const set = key => e => setForm(f => ({ ...f, [key]: e.target.value }));
-  const longest = parseFloat(form.longest_run_mi);
+  const longest = parseFloat(goal.longest_run_mi);
 
   useEffect(() => {
     if (!form.build || !(longest >= 0)) return setLimits(null);
@@ -64,7 +63,7 @@ export default function Register({ onRegistered, onCancel }) {
     const race = fmtDate(raceDay, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
     if (!form.build) return `Your plan starts empty: ${weeks} weeks ending ${race}. Add sessions on the Plan page, or import a plan CSV.`;
     if (!limits) return `Race day: ${race}. Tell us where you are now to build the plan.`;
-    if (longest < limits.min_long_run_mi || parseFloat(form.weekly_mi) < limits.min_weekly_mi)
+    if (longest < limits.min_long_run_mi || parseFloat(goal.weekly_mi) < limits.min_weekly_mi)
       return `A marathon plan needs a running base first: a run of at least ${limits.min_long_run_mi} mi and about ${limits.min_weekly_mi} mi a week.`;
     if (weeks < limits.min_weeks)
       return `From a ${longest} mi longest run, building up safely takes at least ${limits.min_weeks} weeks. Add weeks or start empty.`;
@@ -78,11 +77,10 @@ export default function Register({ onRegistered, onCancel }) {
     setBusy(true);
     setError(null);
     try {
-      const { confirm, build, longest_run_mi, weekly_mi, runs_per_week, ...body } = form;
-      const goal = build
-        ? { longest_run_mi: longest, weekly_mi: parseFloat(weekly_mi), runs_per_week: parseInt(runs_per_week, 10) }
-        : null;
-      onRegistered(await api("/api/auth/register", jsonRequest("POST", { ...body, weeks, goal })));
+      const { confirm, build, ...body } = form;
+      onRegistered(
+        await api("/api/auth/register", jsonRequest("POST", { ...body, weeks, goal: build ? goalBody(goal) : null })),
+      );
     } catch (err) {
       setError(err.message);
       setBusy(false);
@@ -165,48 +163,7 @@ export default function Register({ onRegistered, onCancel }) {
           />
           Start with an empty plan (I'll add sessions or import a CSV)
         </label>
-        {form.build && (
-          <>
-            <div className="grid2">
-              <label className="field">
-                <span>Longest run, last 4 weeks (mi)</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  max={50}
-                  step={0.5}
-                  required
-                  value={form.longest_run_mi}
-                  onChange={set("longest_run_mi")}
-                />
-              </label>
-              <label className="field">
-                <span>Miles a week now</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  max={200}
-                  step={0.5}
-                  required
-                  value={form.weekly_mi}
-                  onChange={set("weekly_mi")}
-                />
-              </label>
-            </div>
-            <label className="field">
-              <span>Runs a week</span>
-              <select value={form.runs_per_week} onChange={set("runs_per_week")}>
-                {[3, 4, 5].map(n => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
+        {form.build && <GoalFields values={goal} onChange={(key, value) => setGoal(g => ({ ...g, [key]: value }))} />}
         <p className="muted small-note">{planNote()}</p>
         {error && (
           <div className="form-error" role="alert">

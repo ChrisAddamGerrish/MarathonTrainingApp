@@ -54,6 +54,13 @@ day on the last Sunday: two taper weeks, a 20 mi peak long run three weeks out, 
 the long run grows a mile a week with a step-back every fourth week; a long plan holds the long run
 at 13 mi until the build starts. It refuses plans too short to build up safely from the runner's
 longest run (never under 16 weeks) and runners without a base yet (a 3 mi run, 10 mi a week).
+An easy pace gives the runs target durations (and the race a placeholder finish time), and
+strength or bike sessions can fill the days without a run, with Friday kept for rest.
+
+**Rebuild plan** on the Plan page does the same for an existing plan when the race moves: it
+keeps the weeks up to this one and regenerates the rest, starting from the last four weeks of
+logged runs. It shows what would change first, and backs the database up before applying, like
+importing a plan CSV.
 
 ### Strava
 

@@ -59,6 +59,9 @@ def build_weeks(plan_weeks: list[dict], plan: list[dict], activities: list[dict]
             "end": (plan_start + timedelta(weeks=pw["week"] - 1, days=6)).isoformat(),
             "planned_run_mi": 0.0,
             "actual_run_mi": 0.0,
+            # The week's Long Run session, and its longest logged run (None: there's none).
+            "planned_long_run_mi": None,
+            "actual_long_run_mi": None,
             "actual_bike_mi": 0.0,
             "planned_min": 0.0,
             "actual_min": 0.0,
@@ -73,6 +76,8 @@ def build_weeks(plan_weeks: list[dict], plan: list[dict], activities: list[dict]
         w = weeks[p["week"]]
         if p["category"] in RUN_CATEGORIES:
             w["planned_run_mi"] += p["target_distance_mi"] or 0
+        if p["run_subtype"] == "Long Run" and p["target_distance_mi"]:
+            w["planned_long_run_mi"] = max(w["planned_long_run_mi"] or 0, p["target_distance_mi"])
         w["planned_min"] += p["target_duration_min"] or 0
         if p["counts"]:
             w["sessions_planned"] += 1
@@ -84,6 +89,8 @@ def build_weeks(plan_weeks: list[dict], plan: list[dict], activities: list[dict]
             continue
         if a["category"] in RUN_CATEGORIES:
             w["actual_run_mi"] += a["distance_mi"] or 0
+            if a["distance_mi"]:
+                w["actual_long_run_mi"] = round(max(w["actual_long_run_mi"] or 0, a["distance_mi"]), 2)
         elif a["category"] == "Bike":
             w["actual_bike_mi"] += a["distance_mi"] or 0
         w["actual_min"] += a["duration_min"] or 0

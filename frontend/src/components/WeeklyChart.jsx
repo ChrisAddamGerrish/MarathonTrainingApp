@@ -45,10 +45,22 @@ function Tooltip({ week, left, top, width, started }) {
         <span>Planned</span>
         <span className="num">{+week.planned_run_mi.toFixed(1)} mi</span>
       </div>
+      {week.planned_long_run_mi != null && (
+        <div className="row sub">
+          <span>Long run</span>
+          <span className="num">{+week.planned_long_run_mi.toFixed(1)} mi</span>
+        </div>
+      )}
       <div className="row">
         <span>Actual</span>
         <span className="num">{started ? `${+week.actual_run_mi.toFixed(1)} mi` : "—"}</span>
       </div>
+      {started && week.actual_long_run_mi != null && (
+        <div className="row sub">
+          <span>Long run</span>
+          <span className="num">{+week.actual_long_run_mi.toFixed(1)} mi</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -103,6 +103,38 @@ class GeneratedPlanTests(unittest.TestCase):
         plan = by_week(generator.generate_plan(52, 6, 15, 5))
         self.assertEqual(max(long_run(plan[w]) for w in range(1, 40)), generator.BASE_LONG_RUN_MI)
 
+    def test_easy_pace_sets_durations(self):
+        rows = generator.generate_plan(18, 10, 20, 3, easy_pace_min_per_mi=10)
+        for r in rows:
+            with self.subTest(plan_id=r["plan_id"]):
+                if r["category"] == "Run":
+                    self.assertEqual(r["target_duration_min"], round(r["target_distance_mi"] * 10))
+                elif r["category"] == "Race":
+                    self.assertEqual(r["target_duration_min"], round(26.2 * 9))  # a minute a mile quicker
+                    self.assertIn("placeholder", r["notes"])
+        self.assertTrue(all(r["target_duration_min"] is None for r in generator.generate_plan(18, 10, 20, 3)))
+
+    def test_cross_training_on_non_run_days(self):
+        plan = by_week(generator.generate_plan(18, 10, 20, 3, cross_training=["Strength", "Bike"]))
+        normal = {r["day"]: (r["category"], r["target_duration_min"]) for r in plan[1]}
+        self.assertEqual(normal, {"Mon": ("Strength", 30), "Tue": ("Run", None), "Wed": ("Bike", 45),
+                                  "Thu": ("Run", None), "Fri": ("Rest", None), "Sat": ("Bike", 45),
+                                  "Sun": ("Run", None)})
+        step_back = {r["day"]: r["target_duration_min"] for r in plan[6]}  # lighter, like the runs
+        self.assertEqual((step_back["Mon"], step_back["Wed"]), (20, 30))
+        self.assertEqual({r["category"] for r in plan[18]}, {"Rest", "Run", "Race"})  # race week rests
+        only_strength = {r["day"]: r["category"] for r in by_week(
+            generator.generate_plan(18, 10, 20, 5, cross_training=["Strength"]))[1]}
+        self.assertEqual((only_strength["Mon"], only_strength["Fri"]), ("Strength", "Rest"))
+
+    def test_rebuilding_numbers_from_the_first_week_without_the_new_runner_floor(self):
+        self.assertEqual(generator.min_weeks(18, new_runner=False), 7)
+        rows = generator.generate_plan(7, 18, 30, 4, first_week=26, new_runner=False)
+        self.assertEqual((rows[0]["plan_id"], rows[-1]["plan_id"]), ("W26-Mon", "W32-Sun"))
+        self.assertEqual(rows[-1]["category"], "Race")
+        with self.assertRaises(UnprocessableError):
+            generator.generate_plan(7, 18, 30, 4)  # a new runner still needs 16 weeks
+
     def test_rows_pass_the_plan_backup_rules(self):
         # The same validation an imported plan gets; also checks plan ids are unique.
         rows = generator.generate_plan(18, 10, 20, 3)
