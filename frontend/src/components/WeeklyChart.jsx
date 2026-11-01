@@ -19,14 +19,52 @@ function useElementWidth() {
   return [ref, width];
 }
 
-/** Bar with a 4px rounded data end, square at the baseline. */
-function barPath(x, val, bw, top, ph) {
-  const h = (val / top) * ph;
-  if (h <= 0) return "";
-  const r = Math.min(4, bw / 2, h);
-  const yy = M.t + ph - h;
+const GAP = 2; // px of surface between a bar's long run and its other runs
+
+/** A bar segment from y0 (bottom) up to y1, its top rounded (4px) if it's the bar's data end. */
+function segmentPath(x, y0, y1, bw, roundTop) {
+  if (y0 - y1 <= 0) return "";
+  const r = roundTop ? Math.min(4, bw / 2, y0 - y1) : 0;
+  return `M${x},${y0}V${y1 + r}Q${x},${y1} ${x + r},${y1}H${x + bw - r}Q${x + bw},${y1} ${x + bw},${y1 + r}V${y0}Z`;
+}
+
+/** A week's bar as [long run, other runs] paths: the long run at the bottom, square at the baseline. */
+function stackedPaths(x, total, long, bw, top, ph) {
   const base = M.t + ph;
-  return `M${x},${base}V${yy + r}Q${x},${yy} ${x + r},${yy}H${x + bw - r}Q${x + bw},${yy} ${x + bw},${yy + r}V${base}Z`;
+  const toPx = v => (v / top) * ph;
+  const longH = Math.min(toPx(long || 0), toPx(total));
+  const totalH = toPx(total);
+  const hasOther = totalH - longH > 0.5;
+  const longPath = segmentPath(x, base, base - longH, bw, !hasOther);
+  const otherBottom = longH > 0 ? base - longH - GAP : base;
+  const otherPath = hasOther ? segmentPath(x, otherBottom, Math.min(base - totalH, otherBottom), bw, true) : "";
+  return [longPath, otherPath];
+}
+
+const other = (total, long) => Math.max(total - (long || 0), 0);
+const mi = x => `${+x.toFixed(1)} mi`;
+
+function Split({ long, total, kind }) {
+  return (
+    <>
+      {long != null && (
+        <div className="row sub">
+          <span>
+            <i className="sw" style={{ background: `var(--series-${kind}-long)` }} />
+            Long run
+          </span>
+          <span className="num">{mi(long)}</span>
+        </div>
+      )}
+      <div className="row sub">
+        <span>
+          <i className="sw" style={{ background: `var(--series-${kind}-other)` }} />
+          Other runs
+        </span>
+        <span className="num">{mi(other(total, long))}</span>
+      </div>
+    </>
+  );
 }
 
 function Tooltip({ week, left, top, width, started }) {
@@ -43,29 +81,21 @@ function Tooltip({ week, left, top, width, started }) {
       </b>
       <div className="row">
         <span>Planned</span>
-        <span className="num">{+week.planned_run_mi.toFixed(1)} mi</span>
+        <span className="num">{mi(week.planned_run_mi)}</span>
       </div>
-      {week.planned_long_run_mi != null && (
-        <div className="row sub">
-          <span>Long run</span>
-          <span className="num">{+week.planned_long_run_mi.toFixed(1)} mi</span>
-        </div>
-      )}
+      {week.planned_run_mi > 0 && <Split long={week.planned_long_run_mi} total={week.planned_run_mi} kind="planned" />}
       <div className="row">
         <span>Actual</span>
-        <span className="num">{started ? `${+week.actual_run_mi.toFixed(1)} mi` : "—"}</span>
+        <span className="num">{started ? mi(week.actual_run_mi) : "—"}</span>
       </div>
-      {started && week.actual_long_run_mi != null && (
-        <div className="row sub">
-          <span>Long run</span>
-          <span className="num">{+week.actual_long_run_mi.toFixed(1)} mi</span>
-        </div>
+      {started && week.actual_run_mi > 0 && (
+        <Split long={week.actual_long_run_mi} total={week.actual_run_mi} kind="actual" />
       )}
     </div>
   );
 }
 
-/** Planned vs. actual run miles per week, hand-rolled SVG. */
+/** Planned vs. actual run miles per week, each bar split into long run and other runs; hand-rolled SVG. */
 export default function WeeklyChart({ weeks, summary, showTable }) {
   const [ref, measured] = useElementWidth();
   const [hover, setHover] = useState(null);
@@ -81,7 +111,9 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
                 <th>Week</th>
                 <th>Type</th>
                 <th className="r">Planned mi</th>
+                <th className="r">Planned long</th>
                 <th className="r">Actual mi</th>
+                <th className="r">Actual long</th>
                 <th className="r">Planned time</th>
                 <th className="r">Actual time</th>
               </tr>
@@ -94,7 +126,11 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
                     <td>{w.week}</td>
                     <td>{w.week_type}</td>
                     <td className="r">{+w.planned_run_mi.toFixed(1)}</td>
+                    <td className="r">{w.planned_long_run_mi != null ? +w.planned_long_run_mi.toFixed(1) : "—"}</td>
                     <td className="r">{started ? +w.actual_run_mi.toFixed(1) : "—"}</td>
+                    <td className="r">
+                      {started && w.actual_long_run_mi != null ? +w.actual_long_run_mi.toFixed(1) : "—"}
+                    </td>
                     <td className="r">{fmtMin(w.planned_min)}</td>
                     <td className="r">{started ? fmtMin(w.actual_min) : "—"}</td>
                   </tr>
@@ -129,7 +165,7 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
         width={W}
         height={H}
         role="img"
-        aria-label={`Planned versus actual run miles for each of ${weeks.length} plan weeks. Use the table view for exact values.`}
+        aria-label={`Planned versus actual run miles for each of ${weeks.length} plan weeks, each split into the long run and the other runs. Use the table view for exact values.`}
       >
         {ticks.map(v => (
           <g key={v}>
@@ -144,11 +180,16 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
           const cx = x0 + gw / 2;
           const isNow = w.week === summary.current_week;
           const started = w.week <= summary.current_week;
+          const [plannedLong, plannedOther] = stackedPaths(
+            cx - bw - 1, w.planned_run_mi, w.planned_long_run_mi, bw, top, ph);
+          const [actualLong, actualOther] = stackedPaths(cx + 1, w.actual_run_mi, w.actual_long_run_mi, bw, top, ph);
           return (
             <g key={w.week}>
               {isNow && <rect className="now-band" x={x0 + 1} y={M.t} width={gw - 2} height={ph} rx={6} />}
-              <path d={barPath(cx - bw - 1, w.planned_run_mi, bw, top, ph)} fill="var(--series-planned)" />
-              {started && <path d={barPath(cx + 1, w.actual_run_mi, bw, top, ph)} fill="var(--series-actual)" />}
+              <path d={plannedLong} fill="var(--series-planned-long)" />
+              <path d={plannedOther} fill="var(--series-planned-other)" />
+              {started && <path d={actualLong} fill="var(--series-actual-long)" />}
+              {started && <path d={actualOther} fill="var(--series-actual-other)" />}
               {(isNow || w.week % labelEvery === 0 || w.week === 1) && (
                 <text className={isNow ? "strong" : ""} x={cx} y={H - 8} textAnchor="middle">
                   {w.week}

@@ -84,12 +84,20 @@ export default function Dashboard() {
         <div className="card chart-card">
           <div className="legend">
             <span>
-              <i style={{ background: "var(--series-planned)" }} />
-              Planned
+              <i style={{ background: "var(--series-planned-long)" }} />
+              Planned long run
             </span>
             <span>
-              <i style={{ background: "var(--series-actual)" }} />
-              Actual
+              <i style={{ background: "var(--series-planned-other)" }} />
+              Planned other runs
+            </span>
+            <span>
+              <i style={{ background: "var(--series-actual-long)" }} />
+              Actual long run
+            </span>
+            <span>
+              <i style={{ background: "var(--series-actual-other)" }} />
+              Actual other runs
             </span>
           </div>
           <WeeklyChart weeks={weeks} summary={s} showTable={chartTable} />

@@ -11,6 +11,11 @@
   --accent-ink:#ffffff;
   --series-actual:  #2a78d6;
   --series-planned: #a8a69f;
+  /* The weekly chart splits each bar: long run (darker) under the other runs (lighter). */
+  --series-planned-long:  #85837c;
+  --series-planned-other: #cdcbc4;
+  --series-actual-long:   #2a78d6;
+  --series-actual-other:  #9cc3f0;
   --c-run:      #2a78d6;
   --c-bike:     #eb6834;
   --c-strength: #1baf7a;
@@ -39,6 +44,10 @@
     --line:      #2f2f2c;
     --series-actual:  #3987e5;
     --series-planned: #6b6a64;
+    --series-planned-long:  #85847d;
+    --series-planned-other: #57564f;
+    --series-actual-long:   #3987e5;
+    --series-actual-other:  #2b64a8;
     --c-run:      #3987e5;
     --c-bike:     #d95926;
     --c-strength: #199e70;
@@ -209,6 +218,7 @@ a.btn { color: inherit; text-decoration: none; }
 .tip .row { display: flex; justify-content: space-between; gap: 18px; }
 .tip .row.sub { padding-left: 12px; opacity: .8; }
 .tip .row.sub > span:first-child::before { content: "• "; }
+.tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 
 table.data { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 table.data th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
