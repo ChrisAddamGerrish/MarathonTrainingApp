@@ -3,8 +3,8 @@
 A new account gets `weeks` weeks from its plan start (a Monday). Given a goal (the runner's current
 longest run, weekly miles and runs a week), services/generator.py fills them with a plan ending in the
 marathon; without one they're empty Normal weeks, to be filled in on the Plan page or from a plan
-backup. Registering doesn't finish the
-setup: the account has to connect Strava before it can use the app (api/deps.py).
+backup. Registering doesn't finish the setup: the account has to connect Strava before it can use
+the app (api/deps.py).
 """
 import hashlib
 import logging
