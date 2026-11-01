@@ -1,14 +1,16 @@
 """User accounts: registering with an invite code, invites, passwords.
 
-A new account starts with an empty plan: `weeks` Normal weeks from its plan start (a Monday) and no
-sessions, to be filled in on the Plan page or from a plan backup. Registering doesn't finish the
+A new account gets `weeks` weeks from its plan start (a Monday). Given a goal (the runner's current
+longest run, weekly miles and runs a week), services/generator.py fills them with a plan ending in the
+marathon; without one they're empty Normal weeks, to be filled in on the Plan page or from a plan
+backup. Registering doesn't finish the
 setup: the account has to connect Strava before it can use the app (api/deps.py).
 """
 import hashlib
 import logging
 import secrets
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,7 +18,8 @@ from sqlalchemy.orm import Session
 from backend.app.core import auth
 from backend.app.core.database import SessionLocal
 from backend.app.core.errors import ConflictError, UnprocessableError
-from backend.app.models import Invite, PlanWeek, User
+from backend.app.models import Invite, PlanWeek, TrainingPlan, User
+from backend.app.services import generator
 
 log = logging.getLogger("marathon.auth")
 
@@ -42,12 +45,21 @@ def any_can_sign_in(session: Session) -> bool:
 
 
 def _add_user(session: Session, username: str, password: str, plan_start: date, weeks: int,
-              is_admin: bool = False) -> User:
+              is_admin: bool = False, plan: Optional[list[dict[str, Any]]] = None) -> User:
+    """`plan`: generated sessions (generator.generate_plan) to fill the weeks with."""
     user = User(username=username, password_hash=auth.hash_password(password), is_admin=is_admin,
                 plan_start=plan_start)
     session.add(user)
     session.flush()  # the user row first: the weeks refer to it
-    session.add_all(PlanWeek(user_id=user.user_id, week=n, week_type="Normal") for n in range(1, weeks + 1))
+    week_types = {r["week"]: r["week_type"] for r in plan or []}
+    session.add_all(PlanWeek(user_id=user.user_id, week=n, week_type=week_types.get(n, "Normal"))
+                    for n in range(1, weeks + 1))
+    session.flush()  # and the weeks before their sessions
+    session.add_all(TrainingPlan(user_id=user.user_id, plan_id=r["plan_id"], week=r["week"], day=r["day"],
+                                 category=r["category"], run_subtype=r["run_subtype"],
+                                 planned_session=r["planned_session"], target_distance_mi=r["target_distance_mi"],
+                                 target_duration_min=r["target_duration_min"], notes=r["notes"])
+                    for r in plan or [])
     return user
 
 
@@ -65,17 +77,20 @@ def validate_new_account(session: Session, username: str, password: str, plan_st
 
 
 def register(session: Session, invite_code: str, username: str, password: str, plan_start: date,
-             weeks: int) -> User:
-    """Create an account with a (single-use) invite code. Raises a domain error if anything's off."""
+             weeks: int, goal: Optional[dict[str, Any]] = None) -> User:
+    """Create an account with a (single-use) invite code. Raises a domain error if anything's off,
+    including a goal that's too soon to build up to safely (generator.check_goal)."""
     invite = session.get(Invite, _code_hash(invite_code))
     now = _utc(datetime.now(timezone.utc))
     if invite is None or invite.used_by is not None or invite.expires_at < now:
         raise UnprocessableError("That invite code isn't valid. It may have been used already or expired.")
     validate_new_account(session, username, password, plan_start, weeks)
-    user = _add_user(session, username, password, plan_start, weeks)
+    plan = generator.generate_plan(weeks, **goal) if goal is not None else None
+    user = _add_user(session, username, password, plan_start, weeks, plan=plan)
     invite.used_by, invite.used_at = user.user_id, now
     session.commit()
-    log.info("User %s (%s) registered; plan starts %s, %s weeks", user.user_id, username, plan_start, weeks)
+    log.info("User %s (%s) registered; plan starts %s, %s weeks, %s", user.user_id, username, plan_start, weeks,
+             "generated" if plan else "empty")
     return user
 
 

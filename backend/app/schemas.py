@@ -52,5 +52,13 @@ class PlanSessionIn(BaseModel):
         return self
 
 
+class PlanGoalIn(BaseModel):
+    """Where a new runner is now, for generating their plan (services/generator.py checks it's safe)."""
+
+    longest_run_mi: float = Field(ge=0, le=50)  # in the last four weeks
+    weekly_mi: float = Field(ge=0, le=200)
+    runs_per_week: int = Field(ge=1, le=7)
+
+
 class WeekIn(BaseModel):
     week_type: WeekType

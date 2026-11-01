@@ -45,10 +45,10 @@ def invite(admin_client):
     return response.json()["code"]
 
 
-def register(client, code, username=None, password="a long enough password", plan_start=START, weeks=12):
+def register(client, code, username=None, password="a long enough password", plan_start=START, weeks=12, goal=None):
     return client.post("/api/auth/register", json={
         "invite": code, "username": username or f"runner{next(_counter)}", "password": password,
-        "plan_start": plan_start, "weeks": weeks})
+        "plan_start": plan_start, "weeks": weeks, "goal": goal})
 
 
 def user_id(username):
@@ -102,6 +102,30 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(response.json()["plan_id"], "W1-Mon")  # the owner has a W1-Mon too; ids are per user
         self.assertEqual(client.put("/api/plan/weeks/2", json={"week_type": "Peak"}).status_code, 200)
         self.assertEqual([w["week_type"] for w in client.get("/api/data").json()["weeks"][:2]], ["Normal", "Peak"])
+
+    def test_a_goal_generates_the_plan(self):
+        goal = {"longest_run_mi": 10, "weekly_mi": 20, "runs_per_week": 3}
+        client, _ = new_user(self.admin, weeks=18, goal=goal)
+        data = client.get("/api/data").json()
+        self.assertEqual([w["week_type"] for w in data["weeks"][-4:]], ["Peak", "Taper", "Taper", "Race"])
+        self.assertEqual(len(data["plan"]), 18 * 7)
+        race = next(p for p in data["plan"] if p["plan_id"] == "W18-Sun")
+        self.assertEqual((race["category"], race["target_distance_mi"], race["date"]), ("Race", 26.2, "2027-02-07"))
+        self.assertEqual(data["summary"]["race_date"], "2027-02-07")
+
+    def test_a_goal_too_soon_is_refused_and_keeps_the_invite(self):
+        code = invite(self.admin)
+        goal = {"longest_run_mi": 6, "weekly_mi": 15, "runs_per_week": 4}
+        response = register(TestClient(app), code, weeks=20, goal=goal)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("at least 23 weeks", response.json()["detail"])
+        auth_routes._failures.clear()
+        self.assertEqual(register(TestClient(app), code, weeks=23, goal=goal).status_code, 201)
+
+    def test_plan_minimum(self):
+        response = TestClient(app).get("/api/auth/plan-minimum", params={"longest_run_mi": 6})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["min_weeks"], 23)
 
     def test_invites_are_single_use(self):
         code = invite(self.admin)
