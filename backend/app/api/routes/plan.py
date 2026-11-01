@@ -1,4 +1,5 @@
 """Training plan routes: editing the plan, and skipping sessions."""
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter
@@ -7,14 +8,33 @@ from backend.app.api.deps import SessionDep
 from backend.app.repository import (
     create_plan_session,
     delete_plan_session,
+    rebuild_plan,
+    recent_fitness,
     set_week_type,
     skip_session,
     unskip_session,
     update_plan_session,
 )
-from backend.app.schemas import PlanSessionIn, SkipIn, WeekIn
+from backend.app.schemas import PlanSessionIn, RebuildIn, SkipIn, WeekIn
+from backend.app.services import generator
 
 router = APIRouter(prefix="/plan", tags=["plan"])
+
+
+@router.get("/rebuild")
+def rebuild_defaults(session: SessionDep):
+    """What the rebuild form starts from: the runner's last four weeks, and the safe minimum."""
+    fitness = recent_fitness(session, date.today())
+    longest = fitness["longest_run_mi"] or 0
+    return {**fitness, "min_long_run_mi": generator.MIN_LONG_RUN_MI, "min_weekly_mi": generator.MIN_WEEKLY_MI,
+            "min_remaining_weeks": generator.min_weeks(longest, new_runner=False)}
+
+
+@router.post("/rebuild")
+def rebuild(body: RebuildIn, session: SessionDep, apply: bool = False):
+    """Replace the weeks after this one with a generated plan. Without ?apply=true nothing is
+    written: the response says what would change."""
+    return rebuild_plan(session, date.today(), body.weeks, body.goal.model_dump(), apply)
 
 
 @router.post("/weeks/{week}/sessions", status_code=201)

@@ -52,5 +52,22 @@ class PlanSessionIn(BaseModel):
         return self
 
 
+class PlanGoalIn(BaseModel):
+    """Where a new runner is now, for generating their plan (services/generator.py checks it's safe)."""
+
+    longest_run_mi: float = Field(ge=0, le=50)  # in the last four weeks
+    weekly_mi: float = Field(ge=0, le=200)
+    runs_per_week: int = Field(ge=1, le=7)
+    easy_pace_min_per_mi: Optional[float] = Field(None, ge=4, le=25)  # None: no target durations
+    cross_training: list[Literal["Strength", "Bike"]] = []
+
+
+class RebuildIn(BaseModel):
+    """Rebuilding the weeks after this one, with the race on the last Sunday of week `weeks`."""
+
+    weeks: int = Field(ge=1, le=52)
+    goal: PlanGoalIn
+
+
 class WeekIn(BaseModel):
     week_type: WeekType

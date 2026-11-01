@@ -37,7 +37,51 @@ function barPath(x, y0, y1, bw, r) {
   return `M${x},${y0}V${y1 + r}Q${x},${y1} ${x + r},${y1}H${x + bw - r}Q${x + bw},${y1} ${x + bw},${y1 + r}V${y0}Z`;
 }
 
-function Tooltip({ week, left, top, width, started, isNow }) {
+const GAP = 2; // px of surface between a bar's long run and its other runs
+const mi = x => `${+x.toFixed(1)} mi`;
+const longOf = (long, total) => Math.min(long || 0, total);
+
+/** A total broken into its long run and the other runs, with swatches like the bar's segments
+ * (nothing for a week without a long run, such as race week). */
+function Split({ long, total, color }) {
+  const l = longOf(long, total);
+  if (l <= 0) return null;
+  return (
+    <>
+      <div className="row sub">
+        <span>
+          <i className="sw" style={{ background: color }} />
+          Long run
+        </span>
+        <span className="num">{mi(l)}</span>
+      </div>
+      <div className="row sub">
+        <span>
+          <i className="sw other" style={{ background: color }} />
+          Other runs
+        </span>
+        <span className="num">{mi(total - l)}</span>
+      </div>
+    </>
+  );
+}
+
+/** A long run at the bottom with the other runs on top; the top is rounded unless more stacks on it.
+ * A week without a long run is one solid bar. */
+function StackedRun({ x, base, y, bw, total, long, color, capped }) {
+  const l = longOf(long, total) || total;
+  const hasOther = total - l > 0;
+  return (
+    <>
+      <path d={barPath(x, base, y(l), bw, hasOther || capped ? 0 : 4)} fill={color} />
+      {hasOther && (
+        <path className="other" d={barPath(x, l > 0 ? y(l) - GAP : base, y(total), bw, capped ? 0 : 4)} fill={color} />
+      )}
+    </>
+  );
+}
+
+function Tooltip({ week, left, top, width, started, isNow, color }) {
   const ref = useRef(null);
   // Centre on the hovered week, but keep the tooltip inside the chart.
   useLayoutEffect(() => {
@@ -51,12 +95,16 @@ function Tooltip({ week, left, top, width, started, isNow }) {
       </b>
       <div className="row">
         <span>Planned</span>
-        <span className="num">{+week.planned_run_mi.toFixed(1)} mi</span>
+        <span className="num">{mi(week.planned_run_mi)}</span>
       </div>
+      {week.planned_run_mi > 0 && <Split long={week.planned_long_run_mi} total={week.planned_run_mi} color={color} />}
       <div className="row">
         <span>Run</span>
-        <span className="num">{started ? `${+week.actual_run_mi.toFixed(1)} mi` : "—"}</span>
+        <span className="num">{started ? mi(week.actual_run_mi) : "—"}</span>
       </div>
+      {started && week.actual_run_mi > 0 && (
+        <Split long={week.actual_long_run_mi} total={week.actual_run_mi} color={color} />
+      )}
       {started && week.planned_run_mi > week.actual_run_mi && (
         <div className="row">
           <span>{isNow ? "To go" : "Missed"}</span>
@@ -68,8 +116,9 @@ function Tooltip({ week, left, top, width, started, isNow }) {
 }
 
 /**
- * Planned run miles per week as a ladder coloured by week type, hand-rolled SVG. Started weeks
- * stack the miles run under the planned miles still left; a run over plan marks the plan with a line.
+ * Planned run miles per week as a ladder coloured by week type, hand-rolled SVG. Each bar puts the
+ * long run (solid) under the other runs (lighter). Started weeks stack the miles run under the
+ * planned miles still left; a run over plan marks the plan with a line.
  */
 export default function WeeklyChart({ weeks, summary, showTable }) {
   const [ref, measured] = useElementWidth();
@@ -86,7 +135,9 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
                 <th>Week</th>
                 <th>Type</th>
                 <th className="r">Planned mi</th>
+                <th className="r">Planned long</th>
                 <th className="r">Actual mi</th>
+                <th className="r">Actual long</th>
                 <th className="r">Planned time</th>
                 <th className="r">Actual time</th>
               </tr>
@@ -99,7 +150,11 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
                     <td>{w.week}</td>
                     <td>{w.week_type}</td>
                     <td className="r">{+w.planned_run_mi.toFixed(1)}</td>
+                    <td className="r">{w.planned_long_run_mi != null ? +w.planned_long_run_mi.toFixed(1) : "—"}</td>
                     <td className="r">{started ? +w.actual_run_mi.toFixed(1) : "—"}</td>
+                    <td className="r">
+                      {started && w.actual_long_run_mi != null ? +w.actual_long_run_mi.toFixed(1) : "—"}
+                    </td>
                     <td className="r">{fmtMin(w.planned_min)}</td>
                     <td className="r">{started ? fmtMin(w.actual_min) : "—"}</td>
                   </tr>
@@ -138,7 +193,7 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
         width={W}
         height={H}
         role="img"
-        aria-label={`Planned run miles for each of ${weeks.length} plan weeks, coloured by week type, with miles run so far stacked in started weeks. Use the table view for exact values.`}
+        aria-label={`Planned run miles for each of ${weeks.length} plan weeks, coloured by week type and split into the long run and the other runs, with miles run so far stacked in started weeks. Use the table view for exact values.`}
       >
         {ticks.map(v => (
           <g key={v}>
@@ -167,11 +222,12 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
                   {left > 0 && (
                     <path className="left" d={barPath(x, y(run) - 2, y(planned), bw, 4)} fill={color} stroke={color} />
                   )}
-                  <path d={barPath(x, base, y(run), bw, left > 0 ? 0 : 4)} fill={isNow ? "var(--wk-now)" : color} />
+                  <StackedRun x={x} base={base} y={y} bw={bw} total={run} long={w.actual_long_run_mi}
+                    color={isNow ? "var(--wk-now)" : color} capped={left > 0} />
                   {run > planned && planned > 0 && <line className="over" x1={x - 2} x2={x + bw + 2} y1={y(planned)} y2={y(planned)} />}
                 </>
               ) : (
-                <path d={barPath(x, base, y(planned), bw, 4)} fill={color} />
+                <StackedRun x={x} base={base} y={y} bw={bw} total={planned} long={w.planned_long_run_mi} color={color} />
               )}
               {showValues && value > 0 && (
                 <text className={"val" + (isNow ? " strong" : "")} x={cx} y={y(Math.max(planned, value)) - 5} textAnchor="middle">
@@ -225,6 +281,7 @@ export default function WeeklyChart({ weeks, summary, showTable }) {
           width={W}
           started={hovered.week <= summary.current_week}
           isNow={hovered.week === summary.current_week}
+          color={hovered.week === summary.current_week ? "var(--wk-now)" : WEEK_COLORS[hovered.week_type] ?? WEEK_COLORS.Normal}
         />
       )}
     </div>

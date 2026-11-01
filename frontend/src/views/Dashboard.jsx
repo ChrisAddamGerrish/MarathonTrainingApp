@@ -102,7 +102,11 @@ export default function Dashboard() {
             <span className="gap" />
             <span>
               <i style={{ background: "var(--wk-build)" }} />
-              Run
+              Long run
+            </span>
+            <span>
+              <i className="other" style={{ background: "var(--wk-build)" }} />
+              Other runs
             </span>
             <span>
               <i className="left" style={{ background: "var(--wk-build)" }} />

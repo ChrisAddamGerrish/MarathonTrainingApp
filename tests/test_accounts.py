@@ -19,7 +19,9 @@ from sqlalchemy import select
 
 from backend.app.api.routes import auth as auth_routes
 from backend.app.core import config
-from backend.app.core.database import SessionLocal, engine, init_db
+from backend.app.core.database import SessionLocal, Tenant, engine, init_db, user_session
+from backend.app.core.errors import UnprocessableError
+from backend.app import repository
 from backend.app.core.migrations import migrate_to_multi_user
 from backend.app.main import app
 from backend.app.models import Invite, User
@@ -45,10 +47,10 @@ def invite(admin_client):
     return response.json()["code"]
 
 
-def register(client, code, username=None, password="a long enough password", plan_start=START, weeks=12):
+def register(client, code, username=None, password="a long enough password", plan_start=START, weeks=12, goal=None):
     return client.post("/api/auth/register", json={
         "invite": code, "username": username or f"runner{next(_counter)}", "password": password,
-        "plan_start": plan_start, "weeks": weeks})
+        "plan_start": plan_start, "weeks": weeks, "goal": goal})
 
 
 def user_id(username):
@@ -102,6 +104,80 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(response.json()["plan_id"], "W1-Mon")  # the owner has a W1-Mon too; ids are per user
         self.assertEqual(client.put("/api/plan/weeks/2", json={"week_type": "Peak"}).status_code, 200)
         self.assertEqual([w["week_type"] for w in client.get("/api/data").json()["weeks"][:2]], ["Normal", "Peak"])
+
+    def test_a_goal_generates_the_plan(self):
+        goal = {"longest_run_mi": 10, "weekly_mi": 20, "runs_per_week": 3}
+        client, _ = new_user(self.admin, weeks=18, goal=goal)
+        data = client.get("/api/data").json()
+        self.assertEqual([w["week_type"] for w in data["weeks"][-4:]], ["Peak", "Taper", "Taper", "Race"])
+        self.assertEqual(len(data["plan"]), 18 * 7)
+        race = next(p for p in data["plan"] if p["plan_id"] == "W18-Sun")
+        self.assertEqual((race["category"], race["target_distance_mi"], race["date"]), ("Race", 26.2, "2027-02-07"))
+        self.assertEqual(data["summary"]["race_date"], "2027-02-07")
+
+    def test_a_goal_too_soon_is_refused_and_keeps_the_invite(self):
+        code = invite(self.admin)
+        goal = {"longest_run_mi": 6, "weekly_mi": 15, "runs_per_week": 4}
+        response = register(TestClient(app), code, weeks=20, goal=goal)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("at least 23 weeks", response.json()["detail"])
+        auth_routes._failures.clear()
+        self.assertEqual(register(TestClient(app), code, weeks=23, goal=goal).status_code, 201)
+
+    def test_long_runs_in_the_weekly_totals(self):
+        goal = {"longest_run_mi": 10, "weekly_mi": 20, "runs_per_week": 3}
+        client, uid = new_user(self.admin, weeks=18, goal=goal)
+        client.post("/api/activities", json={"activity_date": "2026-10-11", "category": "Run",
+                                             "actual_session": "Long", "distance_mi": 9.4})
+        client.post("/api/activities", json={"activity_date": "2026-10-07", "category": "Run",
+                                             "actual_session": "Easy", "distance_mi": 4})
+        weeks = client.get("/api/data").json()["weeks"]
+        self.assertEqual((weeks[0]["planned_long_run_mi"], weeks[0]["actual_long_run_mi"]), (10, 9.4))
+        self.assertEqual((weeks[1]["actual_long_run_mi"], weeks[17]["planned_long_run_mi"]), (None, None))
+
+    def test_rebuild_keeps_the_weeks_so_far(self):
+        goal = {"longest_run_mi": 10, "weekly_mi": 20, "runs_per_week": 3}
+        client, uid = new_user(self.admin, weeks=18, goal=goal)
+        client.post("/api/activities", json={"activity_date": "2026-10-11", "category": "Run",
+                                             "actual_session": "Long", "distance_mi": 10, "duration_min": 100,
+                                             "plan_id": "W1-Sun"})
+        tenant = Tenant(uid, date.fromisoformat(START))
+        today = date(2026, 10, 21)  # Wednesday of week 3
+        with user_session(tenant) as s:
+            self.assertEqual(repository.recent_fitness(s, today),
+                             {"longest_run_mi": 10, "weekly_mi": 2.5, "runs_per_week": 3, "easy_pace_min_per_mi": 10})
+            before = {r["plan_id"]: r for r in repository.plan_rows(s)}
+            goal = {**goal, "longest_run_mi": 11, "easy_pace_min_per_mi": 10, "cross_training": ["Bike"]}
+            dry = repository.rebuild_plan(s, today, 30, goal, apply=False)
+            self.assertEqual((dry["kept_weeks"], dry["race_date"], dry["unlinked"]), (3, "2027-05-02", 0))
+            self.assertNotIn("backup", dry)
+            self.assertEqual(repository.plan_rows(s), list(before.values()))  # nothing written yet
+            repository.rebuild_plan(s, today, 30, goal, apply=True)
+            after = {r["plan_id"]: r for r in repository.plan_rows(s)}
+        self.assertEqual([after[i] for i in before if int(i[1:i.index("-")]) <= 3],
+                         [before[i] for i in before if int(i[1:i.index("-")]) <= 3])
+        self.assertEqual(max(r["week"] for r in after.values()), 30)
+        self.assertEqual((after["W30-Sun"]["category"], after["W4-Wed"]["category"]), ("Race", "Bike"))
+        self.assertEqual(after["W1-Sun"]["linked_activity_count"], 1)
+        with user_session(tenant) as s, self.assertRaisesRegex(UnprocessableError, "after this week"):
+            repository.rebuild_plan(s, today, 3, goal, apply=False)
+
+    def test_rebuild_routes(self):
+        client, _ = new_user(self.admin, weeks=40)
+        defaults = client.get("/api/plan/rebuild").json()
+        self.assertLessEqual({"longest_run_mi", "weekly_mi", "runs_per_week", "easy_pace_min_per_mi",
+                              "min_remaining_weeks"}, set(defaults))
+        body = {"weeks": 40, "goal": {"longest_run_mi": 12, "weekly_mi": 25, "runs_per_week": 4}}
+        response = client.post("/api/plan/rebuild", json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(client.get("/api/data").json()["plan"], [])  # a preview only
+        self.assertEqual(client.post("/api/plan/rebuild?apply=true", json=body).status_code, 200)
+        self.assertEqual(client.get("/api/data").json()["weeks"][-1]["week_type"], "Race")
+
+    def test_plan_minimum(self):
+        response = TestClient(app).get("/api/auth/plan-minimum", params={"longest_run_mi": 6})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["min_weeks"], 23)
 
     def test_invites_are_single_use(self):
         code = invite(self.admin)

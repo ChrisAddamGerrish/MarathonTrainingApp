@@ -47,6 +47,21 @@ Admins invite people from the app itself. To manage sign-in from the command lin
 .venv\Scripts\python.exe -m backend.cli invite    # print a single-use invite code
 ```
 
+When registering, a new runner picks the plan's first Monday and length, and either starts with an
+empty plan or has one built from where they are now (longest run in the last four weeks, miles a
+week, 3-5 runs a week). The built plan (`backend/app/services/generator.py`) works back from race
+day on the last Sunday: two taper weeks, a 20 mi peak long run three weeks out, and a build where
+the long run grows a mile a week with a step-back every fourth week; a long plan holds the long run
+at 13 mi until the build starts. It refuses plans too short to build up safely from the runner's
+longest run (never under 16 weeks) and runners without a base yet (a 3 mi run, 10 mi a week).
+An easy pace gives the runs target durations (and the race a placeholder finish time), and
+strength or bike sessions can fill the days without a run, with Friday kept for rest.
+
+**Rebuild plan** on the Plan page does the same for an existing plan when the race moves: it
+keeps the weeks up to this one and regenerates the rest, starting from the last four weeks of
+logged runs. It shows what would change first, and backs the database up before applying, like
+importing a plan CSV.
+
 ### Strava
 
 1. Create an API application at https://www.strava.com/settings/api. Set its

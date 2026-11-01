@@ -4,15 +4,17 @@ import logging
 import threading
 import time
 from datetime import date
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel
 
 from backend.app.api.deps import AdminDep, signed_in_user
 from backend.app.core import auth
 from backend.app.core.database import SessionLocal
 from backend.app.core.errors import AppError, NotConfiguredError, TooManyAttemptsError, UnauthorizedError
-from backend.app.services import accounts, strava
+from backend.app.schemas import PlanGoalIn
+from backend.app.services import accounts, generator, strava
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 log = logging.getLogger("marathon.auth")
@@ -37,6 +39,7 @@ class RegisterIn(BaseModel):
     password: str
     plan_start: date
     weeks: int = accounts.DEFAULT_WEEKS
+    goal: Optional[PlanGoalIn] = None  # None: the plan starts empty
     remember: bool = False
 
 
@@ -113,13 +116,22 @@ def register(body: RegisterIn, request: Request, response: Response):
     with SessionLocal() as session:
         try:
             user = accounts.register(session, body.invite, body.username.strip(), body.password,
-                                     body.plan_start, body.weeks)
+                                     body.plan_start, body.weeks,
+                                     body.goal.model_dump() if body.goal else None)
         except AppError:
             _failed(client)  # includes wrong invite codes, which is what this is here to slow down
             raise
     log.info("%s registered from %s", user.username, client)
     _set_cookie(request, response, user.user_id, user.password_hash, body.remember)
     return _session_info(user)
+
+
+@router.get("/plan-minimum")
+def plan_minimum(longest_run_mi: Annotated[float, Query(ge=0, le=50)]):
+    """The shortest plan (in weeks) a new runner can generate from their longest recent run, so the
+    registration form can say so before it's submitted."""
+    return {"min_weeks": generator.min_weeks(longest_run_mi), "min_long_run_mi": generator.MIN_LONG_RUN_MI,
+            "min_weekly_mi": generator.MIN_WEEKLY_MI, "runs_per_week": sorted(generator.RUN_DAYS)}
 
 
 @router.post("/logout")

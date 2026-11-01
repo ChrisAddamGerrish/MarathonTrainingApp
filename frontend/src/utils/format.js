@@ -65,3 +65,13 @@ export const fmtSeconds = s => {
 
 /** "8:59 /mi" from seconds taken over miles. */
 export const paceOf = (seconds, miles) => (seconds && miles ? `${fmtSeconds(seconds / miles)} /mi` : "—");
+
+/** Minutes a mile from "10:30" or "10.5" (null if it isn't a pace). */
+export const parsePace = text => {
+  const m = String(text ?? "").trim().match(/^(\d{1,2})(?::([0-5]\d))?$|^(\d{1,2}\.\d+)$/);
+  if (!m) return null;
+  return m[3] ? Number(m[3]) : Number(m[1]) + Number(m[2] || 0) / 60;
+};
+
+/** "10:30" from minutes a mile. */
+export const fmtPace = min => (min == null ? "" : fmtSeconds(min * 60));

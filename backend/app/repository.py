@@ -7,7 +7,7 @@ looked up by query (_find_plan), never Session.get.
 
 Every change to the data is logged here, once, whichever entry point (REST or MCP) made it."""
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from sqlalchemy import delete, desc, func, insert, select, text
@@ -30,7 +30,7 @@ from backend.app.models import (
     StravaImport,
     TrainingPlan,
 )
-from backend.app.services import planning
+from backend.app.services import generator, planning
 from backend.app.services.planning import DAYS, RUN_CATEGORIES, week_of
 
 log = logging.getLogger("marathon.repo")
@@ -623,6 +623,37 @@ def restore_plan(session: Session, rows: list[dict[str, Any]], apply: bool) -> d
     log.info("Plan restored from a backup: %(added)s added, %(changed)s changed, %(removed)s removed, "
              "%(unlinked)s activities unlinked (database copied to %(backup)s)", result)
     return result
+
+
+def recent_fitness(session: Session, today: date) -> dict[str, Any]:
+    """Where the runner is now, from the runs logged in the last four weeks (the defaults for
+    rebuild_plan): longest run, miles a week, runs a week (as generated plans have them) and
+    typical pace (the median, so a race or a walk doesn't skew it). None where nothing's logged."""
+    runs = list(session.scalars(select(ActivityLog).where(
+        ActivityLog.category.in_(RUN_CATEGORIES), ActivityLog.activity_date > today - timedelta(days=28),
+        ActivityLog.activity_date <= today)))
+    distances = [a.distance_mi for a in runs if a.distance_mi]
+    paces = sorted(a.duration_min / a.distance_mi for a in runs if a.distance_mi and a.duration_min)
+    return {
+        "longest_run_mi": round(max(distances), 1) if distances else None,
+        "weekly_mi": round(sum(distances) / 4, 1) if distances else None,
+        "runs_per_week": min(max(round(len(runs) / 4), min(generator.RUN_DAYS)), max(generator.RUN_DAYS)),
+        "easy_pace_min_per_mi": round(paces[len(paces) // 2], 2) if paces else None,
+    }
+
+
+def rebuild_plan(session: Session, today: date, weeks: int, goal: dict[str, Any], apply: bool) -> dict[str, Any]:
+    """Replace the weeks after this one with a generated plan (services/generator.py) whose race is
+    on the last Sunday of week `weeks`; the weeks up to and including this one are kept as they are.
+    Goes through restore_plan, so apply=False only counts, and applying backs the database up first.
+    A plan that hasn't started yet is rebuilt whole."""
+    kept = max(week_of(today, tenant_of(session).plan_start), 0)
+    if weeks <= kept:
+        raise UnprocessableError(f"The race has to be after this week (week {kept}).")
+    rows = generator.generate_plan(weeks - kept, **goal, first_week=kept + 1, new_runner=kept == 0)
+    result = restore_plan(session, [r for r in plan_rows(session) if r["week"] <= kept] + rows, apply)
+    return {**result, "kept_weeks": kept, "weeks": weeks,
+            "race_date": planning.plan_date(weeks, "Sun", tenant_of(session).plan_start).isoformat()}
 
 
 # --------------------------------------------------------------------------
