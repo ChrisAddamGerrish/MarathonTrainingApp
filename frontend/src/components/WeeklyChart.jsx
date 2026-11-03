@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { fmtMin } from "../utils/format";
+import { fmtDate, fmtMin } from "../utils/format";
 import { jumpTo, weekHref } from "../utils/links";
 
 const H = 280;
@@ -39,6 +39,7 @@ function barPath(x, y0, y1, bw, r) {
 
 const GAP = 2; // px of surface between a bar's long run and its other runs
 const mi = x => `${+x.toFixed(1)} mi`;
+const SHORT_DATE = { month: "short", day: "numeric" };
 const longOf = (long, total) => Math.min(long || 0, total);
 
 /** A total broken into its long run and the other runs, with swatches like the bar's segments
@@ -93,6 +94,9 @@ function Tooltip({ week, left, top, width, started, isNow, color }) {
       <b>
         Week {week.week} · {week.week_type}
       </b>
+      <div className="dates">
+        {fmtDate(week.start, SHORT_DATE)} – {fmtDate(week.end, SHORT_DATE)}
+      </div>
       <div className="row">
         <span>Planned</span>
         <span className="num">{mi(week.planned_run_mi)}</span>
